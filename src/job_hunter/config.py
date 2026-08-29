@@ -49,6 +49,7 @@ def load_profile(path: str | Path) -> Profile:
         skills=_normalized_list(data["skills"]),
         hard_reject_rules={str(k): bool(v) for k, v in data["hard_reject_rules"].items()},
         scoring_weights=weights,
+        discovery_schedule=dict(data.get("discovery_schedule") or {"enabled": True, "times": ["08:00", "18:00"]}),
     )
 
 

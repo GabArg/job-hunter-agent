@@ -1,229 +1,181 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
 
-from job_hunter.database import JobDatabase
 from job_hunter.config import load_profile
+from job_hunter.database import JobDatabase
 from job_hunter.discovery.factory import build_sources
-from job_hunter.pipeline import run_discovery_pipeline, run_pipeline
-from job_hunter.cv import HTMLCVRenderer, adapt_cv, load_master_cv
-from job_hunter.cv.models import CVApprovalState
+from job_hunter.discovery.lock import DiscoveryAlreadyRunning, DiscoveryLock
 from job_hunter.knowledge import KnowledgeUpdater
+from job_hunter.operations import generate_job_cv, next_schedule_time
+from job_hunter.pipeline import run_discovery_pipeline
+
+
+def _display_time(value) -> str:
+    if not value: return "—"
+    try: return datetime.fromisoformat(str(value)).astimezone().strftime("%d/%m/%Y %H:%M")
+    except ValueError: return str(value)
+
+
+def _render_job_detail(database: JobDatabase, row: dict, master_cv_path: str) -> None:
+    reasons = json.loads(str(row["reasons"]))
+    st.subheader(f'{row["decision"]} · {row["title"]}')
+    st.write(f'**{row["company"]}** · {row["location"]} · {row["work_mode"]} · {row["source"]}')
+    st.write(f'Publicada: {_display_time(row["published_at"])} · Detectada: {_display_time(row["first_seen_at"])} · Score: {row["score"]:.2f}')
+    st.write(f'Estado operativo: **{row["application_status"]}**')
+    st.markdown(f'[Abrir oferta original]({row["url"]})')
+    cols = st.columns(3)
+    cols[0].write("**Motivos positivos**"); cols[0].write(reasons.get("positive_reasons") or ["—"])
+    cols[1].write("**Gaps**"); cols[1].write(reasons.get("missing_skills") or ["—"])
+    cols[2].write("**Hard rejects**"); cols[2].write(reasons.get("hard_reject_reasons") or ["—"])
+    st.write("**Skills detectadas:**", ", ".join(reasons.get("matched_skills") or []) or "—")
+    with st.expander("Descripción completa"): st.write(row["description"])
+    job_id, status = int(row["id"]), str(row["application_status"])
+    actions = st.columns(3)
+    if row["decision"] in {"APPLY", "REVIEW"}:
+        label = "Regenerar CV" if status in {"CV_GENERATED", "APPROVED_TO_APPLY", "APPLIED"} else "Generar CV"
+        if actions[0].button(label, key=f"cv-{job_id}"):
+            try:
+                output, adapted = generate_job_cv(database.path, job_id, master_cv_path)
+                st.success(f"CV {adapted.validation_status}: {output}"); st.rerun()
+            except Exception as exc: st.error(str(exc))
+        if actions[1].button("Marcar para aplicar", key=f"short-{job_id}"):
+            database.set_application_status(job_id, "SHORTLISTED"); st.rerun()
+        if actions[2].button("Descartar", key=f"skip-{job_id}"):
+            database.set_application_status(job_id, "SKIPPED"); st.rerun()
+    else: st.warning("REJECT: la generación normal de CV está deshabilitada.")
+    cv_path = Path("outputs/cvs") / str(job_id) / "cv.html"
+    if cv_path.exists():
+        st.download_button("Ver / descargar CV", cv_path.read_text(encoding="utf-8"), "cv.html", "text/html", key=f"view-{job_id}")
+        if status == "CV_GENERATED" and st.button("Aprobar para postular", key=f"approve-{job_id}"):
+            database.set_application_status(job_id, "APPROVED_TO_APPLY"); st.rerun()
+    if status == "APPROVED_TO_APPLY" and st.button("Marcar como postulada", key=f"applied-{job_id}"):
+        database.set_application_status(job_id, "APPLIED"); st.rerun()
 
 st.set_page_config(page_title="Job Hunter Agent", layout="wide")
 st.title("Job Hunter Agent")
-st.caption("Clasificación local y explicable. Esta V1 no realiza postulaciones.")
+st.caption("Descubrimiento, evaluación y preparación de CV con aprobación humana. No realiza postulaciones.")
 
 with st.sidebar:
-    st.header("Pipeline")
-    csv_path = st.text_input("CSV", "data/sample_jobs.csv")
+    st.header("Configuración local")
     profile_path = st.text_input("Perfil", "config/profile.yaml")
     database_path = st.text_input("SQLite", "data/jobs.db")
     master_cv_path = st.text_input("Master CV privado", "private/master_cv.yaml")
-    if st.button("Importar y evaluar", type="primary"):
-        try:
-            result = run_pipeline(csv_path, profile_path, database_path)
-            st.success(f"{len(result.jobs)} procesadas: {result.inserted} nuevas, {result.updated} actualizadas")
-        except Exception as exc:
-            st.error(str(exc))
-    st.divider()
-    st.header("Discovery")
-    discovery_query = st.text_input("Consulta opcional", placeholder="Usar búsquedas del perfil")
-    discovery_limit = st.number_input("Límite por fuente", min_value=1, max_value=100, value=10)
-    max_age_days = st.number_input("Antigüedad máxima (días)", min_value=1, max_value=365, value=14)
+    discovery_limit = st.number_input("Límite por fuente", 1, 100, 10)
+    max_age_days = st.number_input("Antigüedad máxima", 1, 365, 14)
     available_sources = ["remoteok", "arbeitnow", "greenhouse", "lever", "ashby", "workable", "generic"]
     source_names = st.multiselect("Fuentes", available_sources, default=["remoteok", "arbeitnow"])
-    if st.button("Descubrir ofertas"):
+
+database = JobDatabase(database_path)
+profile = load_profile(profile_path)
+schedule = profile.discovery_schedule
+latest_run = database.latest_discovery_run()
+next_run = next_schedule_time(schedule.get("times", [])) if schedule.get("enabled", True) else None
+
+top = st.columns(3)
+top[0].metric("Última búsqueda", _display_time(latest_run.get("finished_at")) if latest_run else "Sin ejecuciones")
+top[1].metric("Próxima búsqueda", _display_time(next_run.isoformat()) if next_run else "Desactivada")
+top[2].metric("Nuevas desde último discovery", database.new_since_latest_discovery())
+
+job_hunt_tab, knowledge_tab, system_tab = st.tabs(["Job Hunt", "Knowledge Base", "System / Runs"])
+
+with job_hunt_tab:
+    action_row = st.columns([1, 3])
+    if action_row[0].button("Buscar ofertas ahora", type="primary", use_container_width=True):
+        started = time.monotonic()
         try:
-            profile = load_profile(profile_path)
-            discovery_run = run_discovery_pipeline(
-                build_sources(profile, source_names), profile_path, database_path,
-                queries=[discovery_query] if discovery_query else None, limit=int(discovery_limit),
-                max_age_days=int(max_age_days),
-            )
-            st.session_state["last_discovery"] = {
-                "at": datetime.now().astimezone().isoformat(timespec="seconds"),
-                "found": sum(stat.found for stat in discovery_run.discovery.stats.values()),
-                "title_relevant": sum(stat.relevant_by_title for stat in discovery_run.discovery.stats.values()),
-                "pre_score_rejected": sum(stat.rejected_pre_score for stat in discovery_run.discovery.stats.values()),
-                "scored": sum(stat.scored for stat in discovery_run.discovery.stats.values()),
-                "new": discovery_run.inserted,
-                "duplicates": discovery_run.discovery.duplicates + discovery_run.updated,
-                "errors": discovery_run.discovery.errors,
-                "decisions": {
-                    decision: sum(job.decision == decision for job in discovery_run.jobs)
-                    for decision in ("APPLY", "REVIEW", "REJECT")
-                },
-                "stats": discovery_run.discovery.stats,
+            with st.spinner("Consultando fuentes públicas..."):
+                with DiscoveryLock(Path(database_path).parent / "discovery.lock"):
+                    result = run_discovery_pipeline(
+                        build_sources(profile, source_names), profile_path, database_path,
+                        limit=int(discovery_limit), max_age_days=int(max_age_days),
+                    )
+            duration = time.monotonic() - started
+            st.session_state["manual_discovery"] = {
+                "Inicio": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "Fuentes": ", ".join(result.discovery.stats), "Nuevas": result.inserted,
+                "Actualizadas": result.updated, "Duplicadas": result.discovery.duplicates,
+                "Descartadas pre-score": sum(stat.rejected_pre_score for stat in result.discovery.stats.values()),
+                "APPLY": sum(job.decision == "APPLY" for job in result.jobs),
+                "REVIEW": sum(job.decision == "REVIEW" for job in result.jobs),
+                "REJECT": sum(job.decision == "REJECT" for job in result.jobs),
+                "Duración": f"{duration:.1f}s",
             }
-            st.success(f"Discovery finalizado: {len(discovery_run.jobs)} ofertas procesadas")
-        except Exception as exc:
-            st.error(f"No se pudo completar discovery: {exc}")
+            st.success("Discovery finalizado")
+        except DiscoveryAlreadyRunning as exc: st.warning(str(exc))
+        except Exception as exc: st.error(f"Discovery falló de forma controlada: {exc}")
+    if st.session_state.get("manual_discovery"):
+        action_row[1].json(st.session_state["manual_discovery"])
 
-last_discovery = st.session_state.get("last_discovery")
-if last_discovery:
-    st.subheader("Última ejecución de Discovery")
-    st.caption(last_discovery["at"])
-    discovery_metrics = st.columns(4)
-    discovery_metrics[0].metric("Jobs fetched", last_discovery["found"])
-    discovery_metrics[1].metric("Relevant by title", last_discovery["title_relevant"])
-    discovery_metrics[2].metric("Rejected pre-score", last_discovery["pre_score_rejected"])
-    discovery_metrics[3].metric("Jobs scored", last_discovery["scored"])
-    extra_metrics = st.columns(2)
-    extra_metrics[0].metric("Nuevas", last_discovery["new"])
-    extra_metrics[1].metric("Duplicadas", last_discovery["duplicates"])
-    decision_metrics = st.columns(3)
-    for column, (decision, count) in zip(decision_metrics, last_discovery["decisions"].items()):
-        column.metric(decision, count)
-    source_rows = [
-        {
-            "Fuente": name,
-            "Fetched": stat.fetched,
-            "Relevant by title": stat.relevant_by_title,
-            "Rejected pre-score": stat.rejected_pre_score,
-            "Scored": stat.scored,
-            "Duplicadas": stat.duplicates,
-            "Error": stat.error or "",
-        }
-        for name, stat in last_discovery["stats"].items()
-    ]
-    st.dataframe(source_rows, hide_index=True, use_container_width=True)
+    counts = database.dashboard_counts()
+    labels = [("Nuevas hoy", "new_today"), ("Recomendadas", "recommended"), ("En revisión", "review"),
+              ("CVs generados", "cvs"), ("Postuladas", "applied"), ("Descartadas", "discarded")]
+    for column, (label, key) in zip(st.columns(6), labels): column.metric(label, counts[key])
 
-st.header("Knowledge Base")
-st.caption("Las propuestas nunca ingresan al master sin aprobación y aplicación explícitas.")
-knowledge = KnowledgeUpdater(
-    master_cv_path, "private/update_proposals.yaml", "private/knowledge_audit.jsonl", "private/backups"
-)
-try:
-    proposals = knowledge.store.list()
-except Exception as exc:
-    proposals = []
-    st.error(f"No se pudieron cargar las propuestas: {exc}")
+    view_labels = {"Nuevas hoy": "today", "Recomendadas": "recommended", "En revisión": "review",
+                   "CVs generados": "cvs", "Postuladas": "applied", "Descartadas": "discarded"}
+    selected_view = st.radio("Vista", list(view_labels), horizontal=True)
+    rows = database.list_jobs(view_labels[selected_view])
+    search = st.text_input("Buscar empresa o puesto", key="job_search").strip().casefold()
+    rows = [row for row in rows if not search or search in str(row["company"]).casefold() or search in str(row["title"]).casefold()]
+    if not rows:
+        st.info("No hay ofertas en esta vista.")
+    else:
+        st.dataframe([{"ID": row["id"], "Decisión": row["decision"], "Score": row["score"],
+                       "Estado": row["application_status"], "Empresa": row["company"], "Puesto": row["title"],
+                       "Modalidad": row["work_mode"], "Detectada": _display_time(row["first_seen_at"]), "Oferta": row["url"]}
+                      for row in rows], hide_index=True, use_container_width=True,
+                     column_config={"Oferta": st.column_config.LinkColumn("Oferta")})
+        choices = {f'#{row["id"]} · {row["decision"]} · {row["company"]} · {row["title"]}': row for row in rows}
+        selected = choices[st.selectbox("Detalle de vacante", list(choices))]
+        _render_job_detail(database, selected, master_cv_path)
 
-if not proposals:
-    st.info("No hay propuestas registradas.")
-else:
-    st.dataframe([{
-        "ID": item.id, "Tipo": item.type.value, "Título": item.title,
-        "Estado": item.status.value, "Evidencia": ", ".join(item.evidence),
-        "Errores": "; ".join(item.validation_errors),
-    } for item in proposals], hide_index=True, use_container_width=True)
-    selected_proposal_id = st.selectbox("Propuesta", [item.id for item in proposals])
-    selected_proposal = knowledge.store.get(selected_proposal_id)
-    st.json(selected_proposal.proposed_changes)
-    action_columns = st.columns(3)
-    if action_columns[0].button("Validar"):
-        try: st.success(f"Estado: {knowledge.validate(selected_proposal_id).status.value}"); st.rerun()
-        except Exception as exc: st.error(str(exc))
-    if action_columns[1].button("Aprobar"):
-        try: st.success(f"Estado: {knowledge.approve(selected_proposal_id).status.value}"); st.rerun()
-        except Exception as exc: st.error(str(exc))
-    if action_columns[2].button("Rechazar"):
-        try: st.success(f"Estado: {knowledge.reject(selected_proposal_id).status.value}"); st.rerun()
-        except Exception as exc: st.error(str(exc))
-    if selected_proposal.status.value == "APPROVED":
-        st.markdown("**Diff propuesto (sólo el bloque afectado)**")
-        st.code(knowledge.preview(selected_proposal_id), language="diff")
-        confirmed = st.checkbox("Confirmo aplicar esta propuesta al master privado")
-        if st.button("Aplicar al Master", disabled=not confirmed, type="primary"):
-            try: st.success(f"Estado: {knowledge.apply(selected_proposal_id).status.value}"); st.rerun()
-            except Exception as exc: st.error(f"No se aplicó el cambio; se ejecutó rollback: {exc}")
+with knowledge_tab:
+    st.subheader("Knowledge Base")
+    st.caption("Validar y aprobar no modifica el master; aplicar siempre muestra el diff y requiere confirmación.")
+    knowledge = KnowledgeUpdater(master_cv_path, "private/update_proposals.yaml", "private/knowledge_audit.jsonl", "private/backups")
+    try: proposals = knowledge.store.list()
+    except Exception as exc: proposals = []; st.error(str(exc))
+    if not proposals: st.info("No hay propuestas.")
+    else:
+        st.dataframe([{"ID": p.id, "Tipo": p.type.value, "Título": p.title, "Estado": p.status.value,
+                       "Evidencia": ", ".join(p.evidence), "Errores": "; ".join(p.validation_errors)} for p in proposals],
+                     hide_index=True, use_container_width=True)
+        proposal_id = st.selectbox("Propuesta", [p.id for p in proposals]); proposal = knowledge.store.get(proposal_id)
+        st.json(proposal.proposed_changes)
+        columns = st.columns(3)
+        if columns[0].button("Validar"):
+            try: knowledge.validate(proposal_id); st.rerun()
+            except Exception as exc: st.error(str(exc))
+        if columns[1].button("Aprobar"):
+            try: knowledge.approve(proposal_id); st.rerun()
+            except Exception as exc: st.error(str(exc))
+        if columns[2].button("Rechazar"):
+            try: knowledge.reject(proposal_id); st.rerun()
+            except Exception as exc: st.error(str(exc))
+        if proposal.status.value == "APPROVED":
+            st.code(knowledge.preview(proposal_id), language="diff")
+            confirmed = st.checkbox("Confirmo aplicar al master factual")
+            if st.button("Aplicar al Master", disabled=not confirmed):
+                try: knowledge.apply(proposal_id); st.rerun()
+                except Exception as exc: st.error(f"Cambio revertido: {exc}")
 
-if not Path(database_path).exists():
-    st.info("Ejecutá el pipeline para crear la base de datos.")
-    st.stop()
-
-rows = JobDatabase(database_path).list_jobs()
-if not rows:
-    st.info("Todavía no hay ofertas.")
-    st.stop()
-
-counts = {decision: sum(row["decision"] == decision for row in rows) for decision in ("APPLY", "REVIEW", "REJECT")}
-columns = st.columns(3)
-for column, decision in zip(columns, counts):
-    column.metric(decision, counts[decision])
-
-st.subheader("CV Agent")
-eligible_rows = [row for row in rows if row["decision"] in {"APPLY", "REVIEW"}]
-if eligible_rows:
-    labels = {
-        f'{row["decision"]} · {row["company"]} · {row["title"]} · #{row["id"]}': row
-        for row in eligible_rows
-    }
-    selected_cv_label = st.selectbox("Oferta APPLY/REVIEW", list(labels))
-    if st.button("Generar CV", type="primary"):
-        try:
-            selected_job = JobDatabase(database_path).get_job(job_id=int(labels[selected_cv_label]["id"]))
-            adapted_cv = adapt_cv(selected_job, load_master_cv(master_cv_path))
-            rendered_cv = HTMLCVRenderer().render(adapted_cv)
-            st.session_state["adapted_cv"] = adapted_cv
-            st.session_state["adapted_cv_html"] = rendered_cv
-        except Exception as exc:
-            st.error(f"No se pudo generar el CV: {exc}")
-else:
-    st.info("No hay ofertas APPLY o REVIEW disponibles para generar un CV.")
-
-adapted_cv = st.session_state.get("adapted_cv")
-if adapted_cv:
-    st.success(f"Validación factual: {adapted_cv.validation_status}")
-    approval = st.selectbox(
-        "Estado del CV", [state.value for state in CVApprovalState if state != CVApprovalState.NOT_GENERATED],
-        index=[state.value for state in CVApprovalState if state != CVApprovalState.NOT_GENERATED].index(
-            adapted_cv.approval_state.value
-        ),
-    )
-    adapted_cv.approval_state = CVApprovalState(approval)
-    st.markdown("**Resumen adaptado**")
-    st.write(adapted_cv.professional_summary)
-    st.markdown("**Skills priorizadas**")
-    st.write(" · ".join(adapted_cv.skills))
-    st.markdown("**Experiencia seleccionada**")
-    for section in adapted_cv.experience_sections:
-        st.markdown(f"{section.role} — {section.company}")
-        for bullet in section.bullets:
-            st.write(f"- {bullet.text}")
-            st.caption(f"Evidencia: {', '.join(bullet.source_fact_ids)}")
-    if adapted_cv.project_sections:
-        st.markdown("**Proyectos seleccionados**")
-        for section in adapted_cv.project_sections:
-            st.markdown(section.name)
-            for bullet in section.bullets:
-                st.write(f"- {bullet.text}")
-                st.caption(f"Evidencia: {', '.join(bullet.source_fact_ids)}")
-    st.download_button(
-        "Descargar HTML", st.session_state["adapted_cv_html"],
-        file_name=f"cv-{adapted_cv.job_id}.html", mime="text/html",
-    )
-
-selected = st.multiselect("Filtrar por decisión", list(counts), default=list(counts))
-search = st.text_input("Buscar por empresa o puesto").strip().lower()
-filtered = [
-    row for row in rows
-    if row["decision"] in selected
-    and (not search or search in str(row["company"]).lower() or search in str(row["title"]).lower())
-]
-
-display_rows = []
-for row in filtered:
-    reasons = json.loads(str(row["reasons"]))
-    explanation = reasons["hard_reject_reasons"] or reasons["positive_reasons"]
-    display_rows.append({
-        "Score": row["score"],
-        "Empresa": row["company"],
-        "Puesto": row["title"],
-        "Modalidad": row["work_mode"],
-        "Decisión": row["decision"],
-        "Motivos": " · ".join(explanation),
-        "Oferta": row["url"],
-    })
-
-st.dataframe(
-    display_rows,
-    use_container_width=True,
-    hide_index=True,
-    column_config={"Oferta": st.column_config.LinkColumn("Oferta")},
-)
+with system_tab:
+    st.subheader("System / Runs")
+    runs = database.list_discovery_runs()
+    st.write(f"Ofertas en SQLite: {len(database.list_jobs())}")
+    st.write(f"Fuentes activas: {', '.join(source_names) or 'Ninguna'}")
+    st.write(f"Horarios locales: {', '.join(schedule.get('times', [])) if schedule.get('enabled', True) else 'Desactivados'}")
+    st.write("Scheduler de Windows: scripts preparados; estado no consultado para evitar requerir privilegios.")
+    if runs:
+        st.dataframe([{"ID": run["id"], "Inicio": _display_time(run["started_at"]), "Fin": _display_time(run["finished_at"]),
+                       "Estado": run["status"], "Fuentes": run["sources"], "Preliminares": run["preliminary"],
+                       "Nuevas": run["new_jobs"], "Actualizadas": run["updated_jobs"], "Duplicadas": run["duplicates"],
+                       "APPLY": run["apply_count"], "REVIEW": run["review_count"], "REJECT": run["reject_count"],
+                       "Errores": run["errors"]} for run in runs], hide_index=True, use_container_width=True)
+    else: st.info("Aún no hay ejecuciones registradas.")

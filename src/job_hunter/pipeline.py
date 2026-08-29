@@ -49,12 +49,26 @@ def run_discovery_pipeline(
     max_age_days: int | None = 14,
 ) -> DiscoveryPipelineResult:
     profile = load_profile(profile_path)
-    discovery = DiscoveryAggregator(sources).discover(
-        queries or _profile_aliases(profile), location=location, limit=limit,
-        preferred_locations=[location] if location else profile.preferred_locations,
-        max_age_days=max_age_days,
-    )
-    processed = process_jobs(discovery.jobs, profile_path, database_path)
+    database = JobDatabase(database_path)
+    run_id = database.create_discovery_run([source.name for source in sources])
+    try:
+        discovery = DiscoveryAggregator(sources).discover(
+            queries or _profile_aliases(profile), location=location, limit=limit,
+            preferred_locations=[location] if location else profile.preferred_locations,
+            max_age_days=max_age_days,
+        )
+        processed = process_jobs(discovery.jobs, profile_path, database_path)
+        counts = {decision: sum(job.decision == decision for job in processed.jobs) for decision in ("APPLY", "REVIEW", "REJECT")}
+        database.finish_discovery_run(
+            run_id, status="COMPLETED_WITH_ERRORS" if discovery.errors else "COMPLETED",
+            preliminary=sum(stat.fetched for stat in discovery.stats.values()), new_jobs=processed.inserted,
+            updated_jobs=processed.updated, duplicates=discovery.duplicates,
+            apply_count=counts["APPLY"], review_count=counts["REVIEW"], reject_count=counts["REJECT"],
+            errors=discovery.errors,
+        )
+    except Exception as exc:
+        database.finish_discovery_run(run_id, status="FAILED", errors={"pipeline": f"{type(exc).__name__}: {exc}"})
+        raise
     return DiscoveryPipelineResult(
         jobs=rank_jobs(processed.jobs),
         inserted=processed.inserted,

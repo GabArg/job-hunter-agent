@@ -45,6 +45,7 @@ class Profile:
     skills: list[str]
     hard_reject_rules: dict[str, bool]
     scoring_weights: dict[str, float]
+    discovery_schedule: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

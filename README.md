@@ -41,6 +41,28 @@ Levantar el dashboard:
 streamlit run app/streamlit_app.py
 ```
 
+La navegación diaria se divide en `Job Hunt`, `Knowledge Base` y `System / Runs`.
+La decisión del scorer (`APPLY/REVIEW/REJECT`) se mantiene separada del seguimiento
+operativo (`NEW`, `SHORTLISTED`, `CV_GENERATED`, `APPROVED_TO_APPLY`, `APPLIED`, `SKIPPED`).
+
+### Discovery automático en Windows
+
+El runner detecta la raíz, activa `.venv` cuando existe, usa el lock de discovery y
+escribe logs en `logs/discovery/`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_discovery.ps1 -Slot manual
+```
+
+La instalación de las tareas de las 08:00 y 18:00 es explícita y manual:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/install_windows_tasks.ps1
+```
+
+El instalador crea `JobHunter-Morning` y `JobHunter-Evening` con hora local,
+`StartWhenAvailable` y una sola instancia. No se ejecuta desde la aplicación ni los tests.
+
 Descubrir ofertas desde APIs públicas (sin login):
 
 ```powershell

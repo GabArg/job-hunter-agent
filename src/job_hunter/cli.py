@@ -10,6 +10,7 @@ from .discovery.factory import build_sources
 from .pipeline import run_discovery_pipeline, run_pipeline
 from .cv import HTMLCVRenderer, adapt_cv, load_master_cv
 from .database import JobDatabase
+from .discovery.lock import DiscoveryAlreadyRunning, DiscoveryLock
 from .knowledge import KnowledgeUpdater, ProposalGenerator
 
 
@@ -81,11 +82,15 @@ def main() -> None:
                 queries.extend(profile.query_groups[group.lower()])
             except KeyError as exc:
                 raise SystemExit(f"Unknown query group: {group}") from exc
-        result = run_discovery_pipeline(
-            build_sources(profile, args.source), args.profile, args.database,
-            queries=queries or None, location=args.location, limit=args.limit,
-            max_age_days=args.max_age_days,
-        )
+        try:
+            with DiscoveryLock(Path(args.database).parent / "discovery.lock"):
+                result = run_discovery_pipeline(
+                    build_sources(profile, args.source), args.profile, args.database,
+                    queries=queries or None, location=args.location, limit=args.limit,
+                    max_age_days=args.max_age_days,
+                )
+        except DiscoveryAlreadyRunning as exc:
+            print(str(exc)); return
         print(f"Discovered {len(result.jobs)} jobs ({result.inserted} new, {result.updated} existing)")
         for name, stat in result.discovery.stats.items():
             status = f"ERROR {stat.error}" if stat.error else "OK"

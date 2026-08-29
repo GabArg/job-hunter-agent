@@ -13,3 +13,6 @@ data/*.sqlite*
 dist/
 build/
 *.egg-info/
+logs/*
+!logs/.gitkeep
+data/discovery.lock

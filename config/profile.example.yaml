@@ -95,3 +95,9 @@ scoring_weights:
   location: 15
   work_mode: 10
   seniority: 10
+
+discovery_schedule:
+  enabled: true
+  times:
+    - "08:00"
+    - "18:00"
