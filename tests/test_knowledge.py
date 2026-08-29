@@ -68,6 +68,19 @@ def test_project_update_missing_project_fails(tmp_path):
         ProposalGenerator().generate({"type": "PROJECT_UPDATE", "project": "Missing", "fact": "x", "evidence": ["github_commit"]}, master)
 
 
+def test_project_proposal_preserves_multiple_facts_and_links(tmp_path):
+    _, master = setup_updater(tmp_path)
+    proposal = ProposalGenerator().generate({
+        "type": "PROJECT", "title": "Repository Project", "category": "Analytics",
+        "facts": ["Primer hecho.", "Segundo hecho."], "technologies": ["Python"],
+        "links": ["https://example.test/repo"], "evidence": ["github_repo"],
+    }, master)
+    value = proposal.proposed_changes["value"]
+    assert value["name"] == "Repository Project"
+    assert [fact["id"] for fact in value["facts"]] == [f'{value["id"]}_fact_01', f'{value["id"]}_fact_02']
+    assert value["links"] == ["https://example.test/repo"]
+
+
 def test_skill_without_evidence_fails(tmp_path):
     _, master = setup_updater(tmp_path)
     proposal = ProposalGenerator().generate({"type": "SKILL", "title": "Demo Skill", "skill": "Demo Skill", "category": "technology"}, master)

@@ -22,6 +22,8 @@ TERM_TAGS = {
     "costos": "costs", "logistica": "logistics", "logística": "logistics", "riesgo": "risk",
     "fintech": "fintech", "quantitative": "quantitative", "churn": "churn",
     "etl": "etl", "eda": "eda",
+    "automation": "automation", "automatizacion": "automation", "automatización": "automation",
+    "workflow automation": "automation", "apis": "apis", "api": "apis",
     "inteligencia artificial": "generative-ai", "ia": "generative-ai",
 }
 IMPACT_TAGS = {
@@ -174,6 +176,8 @@ def _project_score(entry: ProjectEntry, facts: list[FactualText], keywords: list
     score += relevance_score(f"{entry.category} {' '.join(entry.technologies)}", keywords)
     score += len(entry.metrics) * 5
     entry_tags = {_normalize_tag(tag) for fact in [*entry.facts, *entry.metrics] for tag in fact.tags}
+    technology_tags = {_normalize_tag(technology) for technology in entry.technologies}
+    score += 4 * len(technology_tags & {_normalize_tag(tag) for tag in explicit})
     score += 3 * len(entry_tags & IMPACT_TAGS)
     if entry_tags & QUANT_TAGS and not ({_normalize_tag(tag) for tag in explicit} & QUANT_TAGS):
         score -= 12
@@ -194,6 +198,8 @@ def _keyword_in_text(keyword: str, text: str) -> bool:
         "reporting": ("reporting", "reporte", "reportes"),
         "decision-making": ("decision", "decisiones"),
         "processes": ("proceso", "procesos"),
+        "automation": ("automation", "automatizacion", "automatización", "workflow automation"),
+        "apis": ("api", "apis"),
     }
     terms = aliases.get(_normalize_tag(keyword), (_tag_text(keyword),))
     padded = f" {text} "

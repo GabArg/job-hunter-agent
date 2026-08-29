@@ -54,11 +54,12 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--institution"); add.add_argument("--program"); add.add_argument("--status")
     add.add_argument("--company"); add.add_argument("--role"); add.add_argument("--start-date"); add.add_argument("--end-date")
     add.add_argument("--language"); add.add_argument("--level"); add.add_argument("--dates"); add.add_argument("--location")
-    add.add_argument("--project"); add.add_argument("--experience"); add.add_argument("--fact")
+    add.add_argument("--project"); add.add_argument("--experience"); add.add_argument("--fact", action="append", default=[])
     add.add_argument("--category"); add.add_argument("--completed-at")
     add.add_argument("--evidence", action="append", default=[])
     add.add_argument("--skill", action="append", default=[])
     add.add_argument("--technology", action="append", default=[])
+    add.add_argument("--link", action="append", default=[])
     for name in ("validate", "approve", "reject", "preview", "apply"):
         action = actions.add_parser(name); action.add_argument("proposal_id")
     return parser
@@ -116,8 +117,10 @@ def main() -> None:
                 "end_date": args.end_date, "language": args.language, "level": args.level,
                 "dates": args.dates, "location": args.location,
                 "completed_at": args.completed_at, "project": args.project,
-                "experience": args.experience, "fact": args.fact, "category": args.category,
+                "experience": args.experience, "fact": args.fact[0] if args.fact else None,
+                "facts": args.fact, "category": args.category,
                 "evidence": args.evidence, "skills": args.skill, "technologies": args.technology,
+                "links": args.link,
             }.items() if value not in (None, [], "")}
             reserved = {identifier for proposal in updater.store.list() for identifier in _proposal_ids(proposal.proposed_changes)}
             proposal = updater.create(ProposalGenerator().generate(entry, args.master_cv, reserved))

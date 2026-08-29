@@ -52,13 +52,22 @@ class ProposalGenerator:
             }, "skills": entry.get("skills", [])}
         if kind == ProposalType.PROJECT:
             identifier = _next("project", ids)
+            fact_values = entry.get("facts") or ([entry.get("fact")] if entry.get("fact") else [])
+            facts = [
+                {
+                    "id": f"{identifier}_fact_{number:02d}",
+                    "text": str(fact.get("text", "")) if isinstance(fact, dict) else str(fact),
+                    "tags": list(fact.get("tags", [])) if isinstance(fact, dict) else list(entry.get("tags", [])),
+                }
+                for number, fact in enumerate(fact_values, 1)
+            ]
             metrics = [
                 {"id": f"{identifier}_metric_{number:02d}", "text": str(metric.get("text", "")) if isinstance(metric, dict) else str(metric)}
                 for number, metric in enumerate(entry.get("metrics", []), 1)
             ]
             return {"operation": "add_project", "value": {
-                "id": identifier, "name": entry.get("name") or entry.get("project"), "category": entry.get("category", ""),
-                "facts": [{"id": f"{identifier}_fact_01", "text": entry.get("fact", ""), "tags": entry.get("tags", [])}],
+                "id": identifier, "name": entry.get("name") or entry.get("project") or entry.get("title"), "category": entry.get("category", ""),
+                "facts": facts,
                 "metrics": metrics, "technologies": entry.get("technologies", []), "links": entry.get("links", []),
             }}
         if kind == ProposalType.PROJECT_UPDATE:

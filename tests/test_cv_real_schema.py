@@ -4,6 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
+import yaml
 
 from job_hunter.cv.adapter import adapt_cv
 from job_hunter.cv.loader import load_master_cv
@@ -22,10 +23,35 @@ def target_job() -> Job:
     )
 
 
-def test_real_loader_indexes_all_78_unique_ids():
+def test_job_hunter_project_can_be_selected_for_automation_role():
     master = load_master_cv(MASTER)
-    assert len(master.fact_index) == 78
-    assert len(set(master.fact_index)) == 78
+    job = Job(
+        "Data Quality & Workflow Automation Analyst", "Fictional Company", "Argentina", "Remote",
+        "Python, automation, APIs, data quality y workflow automation.", "test",
+        "https://example.com/workflow", score=80, decision="APPLY",
+    )
+    adapted = adapt_cv(job, master)
+    project = next(section for section in adapted.project_sections if section.name == "Job Hunter Agent")
+    assert adapted.validation_status == "VALID"
+    assert all(bullet.source_fact_ids for bullet in project.bullets)
+
+
+def test_real_loader_indexes_every_unique_yaml_id():
+    master = load_master_cv(MASTER)
+    raw = yaml.safe_load(MASTER.read_text(encoding="utf-8"))
+    expected = _raw_ids(raw)
+    assert set(master.fact_index) == expected
+    assert len(master.fact_index) == len(expected)
+
+
+def _raw_ids(value):
+    result = set()
+    if isinstance(value, dict):
+        if value.get("id"): result.add(str(value["id"]))
+        for child in value.values(): result |= _raw_ids(child)
+    elif isinstance(value, list):
+        for child in value: result |= _raw_ids(child)
+    return result
 
 
 def test_summary_preserves_text_and_tags():
