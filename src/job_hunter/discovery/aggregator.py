@@ -9,6 +9,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from ..models import Job
 from ..normalizer import clean_text
 from .base import JobSource
+from .matching import geography_compatible, is_fresh, title_matches
 from .models import RawJob
 
 logger = logging.getLogger(__name__)
@@ -17,11 +18,21 @@ TRACKING_PARAMETERS = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "
 
 @dataclass(slots=True)
 class SourceStats:
-    found: int = 0
-    accepted: int = 0
+    fetched: int = 0
+    relevant_by_title: int = 0
+    rejected_pre_score: int = 0
+    scored: int = 0
     duplicates: int = 0
-    filtered: int = 0
     error: str | None = None
+
+    @property
+    def found(self) -> int: return self.fetched
+
+    @property
+    def accepted(self) -> int: return self.scored
+
+    @property
+    def filtered(self) -> int: return self.rejected_pre_score
 
 
 @dataclass(slots=True)
@@ -47,6 +58,8 @@ class DiscoveryAggregator:
         queries: str | list[str],
         location: str | None = None,
         limit: int | None = None,
+        preferred_locations: list[str] | None = None,
+        max_age_days: int | None = 14,
     ) -> DiscoveryResult:
         query_list = [queries] if isinstance(queries, str) else queries
         result = DiscoveryResult(stats={source.name: SourceStats() for source in self.sources})
@@ -61,10 +74,15 @@ class DiscoveryAggregator:
                     if remaining == 0:
                         break
                     source_jobs.extend(source.discover(query, location, remaining))
-                stat.found = len(source_jobs)
+                stat.fetched = len(source_jobs)
                 for raw in source_jobs:
-                    if not _relevant(raw, query_list):
-                        stat.filtered += 1
+                    if not title_matches(raw.title, query_list):
+                        stat.rejected_pre_score += 1
+                        continue
+                    stat.relevant_by_title += 1
+                    geography_ok, _ = geography_compatible(raw, preferred_locations or [])
+                    if not geography_ok or not is_fresh(raw.published_at, max_age_days):
+                        stat.rejected_pre_score += 1
                         continue
                     job = raw_to_job(raw)
                     url_key = canonical_url(job.url)
@@ -76,7 +94,7 @@ class DiscoveryAggregator:
                         seen_urls.add(url_key)
                     seen_content.add(content_key)
                     result.jobs.append(job)
-                    stat.accepted += 1
+                    stat.scored += 1
             except Exception as exc:  # A failed source must not stop discovery.
                 logger.warning("Discovery source %s failed: %s", source.name, exc)
                 stat.error = f"{type(exc).__name__}: {exc}"
@@ -92,6 +110,8 @@ def raw_to_job(raw: RawJob) -> Job:
         description=_plain_text(raw.description),
         source=raw.source.strip(),
         url=canonical_url(raw.url),
+        published_at=raw.published_at,
+        discovered_at=raw.discovered_at,
     )
 
 
@@ -104,14 +124,3 @@ def canonical_url(url: str) -> str:
 def _plain_text(value: str) -> str:
     without_tags = re.sub(r"<[^>]+>", " ", value or "")
     return re.sub(r"\s+", " ", html.unescape(without_tags)).strip()
-
-
-def _relevant(raw: RawJob, queries: list[str]) -> bool:
-    title = clean_text(raw.title)
-    for query in queries:
-        terms = [term for term in clean_text(query).split() if len(term) > 1]
-        # Discovery queries represent target role names, so every term must be in
-        # the title. This deliberately removes adjacent but irrelevant occupations.
-        if terms and all(term in title for term in terms):
-            return True
-    return False

@@ -67,8 +67,8 @@ def _first_match(text: str, patterns: dict[str, str]) -> str | None:
 
 def _extract_years(text: str) -> float | None:
     patterns = (
-        r"(?:mas de |más de |minimo |mínimo |al menos )?(\d+(?:[.,]\d+)?)\s*(?:\+\s*)?(?:anos|años|years?)",
-        r"(?:experiencia de|required experience(?: of)?)\s*(\d+(?:[.,]\d+)?)",
+        r"(?:experiencia de|required experience(?: of)?|minimum|minimo|mínimo|al menos)\s*(\d+(?:[.,]\d+)?)\s*(?:\+\s*)?(?:anos|años|years?)?",
+        r"(\d+(?:[.,]\d+)?)\s*(?:\+\s*)?(?:anos|años|years?)\s+de experiencia(?:\s+(?:en|como|con)\b|\s*[.,;]|$)",
     )
     values = [
         float(match.replace(",", "."))

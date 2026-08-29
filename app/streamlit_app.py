@@ -7,7 +7,8 @@ from pathlib import Path
 import streamlit as st
 
 from job_hunter.database import JobDatabase
-from job_hunter.discovery.sources import ArbeitnowSource, RemoteOKSource
+from job_hunter.config import load_profile
+from job_hunter.discovery.factory import build_sources
 from job_hunter.pipeline import run_discovery_pipeline, run_pipeline
 
 st.set_page_config(page_title="Job Hunter Agent", layout="wide")
@@ -29,17 +30,23 @@ with st.sidebar:
     st.header("Discovery")
     discovery_query = st.text_input("Consulta opcional", placeholder="Usar búsquedas del perfil")
     discovery_limit = st.number_input("Límite por fuente", min_value=1, max_value=100, value=10)
-    source_names = st.multiselect("Fuentes", ["remoteok", "arbeitnow"], default=["remoteok", "arbeitnow"])
+    max_age_days = st.number_input("Antigüedad máxima (días)", min_value=1, max_value=365, value=14)
+    available_sources = ["remoteok", "arbeitnow", "greenhouse", "lever", "ashby", "workable", "generic"]
+    source_names = st.multiselect("Fuentes", available_sources, default=["remoteok", "arbeitnow"])
     if st.button("Descubrir ofertas"):
         try:
-            factories = {"remoteok": RemoteOKSource, "arbeitnow": ArbeitnowSource}
+            profile = load_profile(profile_path)
             discovery_run = run_discovery_pipeline(
-                [factories[name]() for name in source_names], profile_path, database_path,
+                build_sources(profile, source_names), profile_path, database_path,
                 queries=[discovery_query] if discovery_query else None, limit=int(discovery_limit),
+                max_age_days=int(max_age_days),
             )
             st.session_state["last_discovery"] = {
                 "at": datetime.now().astimezone().isoformat(timespec="seconds"),
                 "found": sum(stat.found for stat in discovery_run.discovery.stats.values()),
+                "title_relevant": sum(stat.relevant_by_title for stat in discovery_run.discovery.stats.values()),
+                "pre_score_rejected": sum(stat.rejected_pre_score for stat in discovery_run.discovery.stats.values()),
+                "scored": sum(stat.scored for stat in discovery_run.discovery.stats.values()),
                 "new": discovery_run.inserted,
                 "duplicates": discovery_run.discovery.duplicates + discovery_run.updated,
                 "errors": discovery_run.discovery.errors,
@@ -57,20 +64,25 @@ last_discovery = st.session_state.get("last_discovery")
 if last_discovery:
     st.subheader("Última ejecución de Discovery")
     st.caption(last_discovery["at"])
-    discovery_metrics = st.columns(3)
-    discovery_metrics[0].metric("Encontradas", last_discovery["found"])
-    discovery_metrics[1].metric("Nuevas", last_discovery["new"])
-    discovery_metrics[2].metric("Duplicadas", last_discovery["duplicates"])
+    discovery_metrics = st.columns(4)
+    discovery_metrics[0].metric("Jobs fetched", last_discovery["found"])
+    discovery_metrics[1].metric("Relevant by title", last_discovery["title_relevant"])
+    discovery_metrics[2].metric("Rejected pre-score", last_discovery["pre_score_rejected"])
+    discovery_metrics[3].metric("Jobs scored", last_discovery["scored"])
+    extra_metrics = st.columns(2)
+    extra_metrics[0].metric("Nuevas", last_discovery["new"])
+    extra_metrics[1].metric("Duplicadas", last_discovery["duplicates"])
     decision_metrics = st.columns(3)
     for column, (decision, count) in zip(decision_metrics, last_discovery["decisions"].items()):
         column.metric(decision, count)
     source_rows = [
         {
             "Fuente": name,
-            "Encontradas": stat.found,
-            "Aceptadas": stat.accepted,
+            "Fetched": stat.fetched,
+            "Relevant by title": stat.relevant_by_title,
+            "Rejected pre-score": stat.rejected_pre_score,
+            "Scored": stat.scored,
             "Duplicadas": stat.duplicates,
-            "Filtradas": stat.filtered,
             "Error": stat.error or "",
         }
         for name, stat in last_discovery["stats"].items()

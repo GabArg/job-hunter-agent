@@ -26,3 +26,9 @@ def fetch_json(url: str, timeout: float = 15.0) -> Any:
     request = Request(url, headers={"Accept": "application/json", "User-Agent": USER_AGENT})
     with urlopen(request, timeout=timeout) as response:  # noqa: S310 - URLs are adapter-owned
         return json.load(response)
+
+
+def fetch_text(url: str, timeout: float = 15.0) -> str:
+    request = Request(url, headers={"Accept": "text/html,application/xhtml+xml", "User-Agent": USER_AGENT})
+    with urlopen(request, timeout=timeout) as response:  # noqa: S310 - target is user-configured HTTPS
+        return response.read().decode(response.headers.get_content_charset() or "utf-8", errors="replace")

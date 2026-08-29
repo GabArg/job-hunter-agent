@@ -4,7 +4,8 @@ import argparse
 import logging
 import sys
 
-from .discovery.sources import ArbeitnowSource, RemoteOKSource
+from .config import load_profile
+from .discovery.factory import build_sources
 from .pipeline import run_discovery_pipeline, run_pipeline
 
 
@@ -17,10 +18,13 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--database", default="data/jobs.db", help="SQLite database path")
     discover = subparsers.add_parser("discover", help="Discover, score and persist public jobs")
     discover.add_argument("--query", action="append", help="Query; may be supplied more than once")
+    discover.add_argument("--query-group", action="append", help="Configured query group; may be repeated")
     discover.add_argument("--location", help="Optional location filter")
     discover.add_argument("--limit", type=int, default=10, help="Maximum matches per source")
+    discover.add_argument("--max-age-days", type=int, default=14, help="Maximum posting age (default: 14)")
     discover.add_argument(
-        "--source", action="append", choices=("remoteok", "arbeitnow"),
+        "--source", action="append",
+        choices=("remoteok", "arbeitnow", "greenhouse", "lever", "ashby", "workable", "generic"),
         help="Source; may be supplied more than once (default: all)",
     )
     discover.add_argument("--profile", default="config/profile.yaml", help="YAML profile path")
@@ -37,20 +41,27 @@ def main() -> None:
         result = run_pipeline(args.input, args.profile, args.database)
         print(f"Processed {len(result.jobs)} jobs ({result.inserted} inserted, {result.updated} updated)")
     else:
-        factories = {"remoteok": RemoteOKSource, "arbeitnow": ArbeitnowSource}
-        names = args.source or list(factories)
+        profile = load_profile(args.profile)
+        queries = list(args.query or [])
+        for group in args.query_group or []:
+            try:
+                queries.extend(profile.query_groups[group.lower()])
+            except KeyError as exc:
+                raise SystemExit(f"Unknown query group: {group}") from exc
         result = run_discovery_pipeline(
-            [factories[name]() for name in names], args.profile, args.database,
-            queries=args.query, location=args.location, limit=args.limit,
+            build_sources(profile, args.source), args.profile, args.database,
+            queries=queries or None, location=args.location, limit=args.limit,
+            max_age_days=args.max_age_days,
         )
         print(f"Discovered {len(result.jobs)} jobs ({result.inserted} new, {result.updated} existing)")
         for name, stat in result.discovery.stats.items():
             status = f"ERROR {stat.error}" if stat.error else "OK"
             print(
-                f"{name}: found={stat.found} accepted={stat.accepted} "
-                f"duplicates={stat.duplicates} filtered={stat.filtered} status={status}"
+                f"{name}: fetched={stat.fetched} title_relevant={stat.relevant_by_title} "
+                f"pre_score_rejected={stat.rejected_pre_score} scored={stat.scored} "
+                f"duplicates={stat.duplicates} status={status}"
             )
-    for job in sorted(result.jobs, key=lambda item: item.score or 0, reverse=True)[:10]:
+    for job in result.jobs[:20]:
         print(f"{job.decision:6} | {job.score:6.2f} | {job.company} | {job.title} | {job.url}")
 
 

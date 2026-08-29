@@ -8,14 +8,69 @@ search_queries:
   - Reporting Analyst
   - Commercial Analyst
   - Analytics Analyst
+query_groups:
+  analytics:
+    - Data Analyst
+    - BI Analyst
+    - Business Intelligence Analyst
+    - Analista de Datos
+    - Analista BI
+  business:
+    - Business Analyst
+    - Analista de Negocios
+    - Commercial Analyst
+    - Analista Comercial
+  operations:
+    - Operations Analyst
+    - Sales Operations Analyst
+    - Performance Analyst
+  pricing:
+    - Pricing Analyst
+    - Analista de Pricing
+    - Revenue Analyst
+    - Marketplace Analyst
+
+# Targets opcionales. No incluir credenciales; sólo boards/career pages públicas.
+# career_targets:
+#   - company: Example Greenhouse Company
+#     ats: greenhouse
+#     board_token: example
+#     careers_url: https://boards.greenhouse.io/example
+#   - company: Example Lever Company
+#     ats: lever
+#     board_token: example
+#     careers_url: https://jobs.lever.co/example
+career_targets: []
 target_roles:
   - pricing analyst
   - business analyst
   - data analyst
+  - bi analyst
+  - business intelligence analyst
+  - analista de datos
+  - analista bi
+  - analista de negocios
+  - analista comercial
+  - analista de pricing
+  - operations analyst
+  - sales operations analyst
+  - reporting analyst
+  - performance analyst
+  - revenue analyst
+  - marketplace analyst
+  - customer insights analyst
+  - planning analyst
+  - commercial analyst
 preferred_locations:
   - buenos aires
   - argentina
-  - remote
+  - caba
+  - amba
+  - provincia de buenos aires
+  - remote argentina
+  - remote latam
+  - latin america
+  - latam
 preferred_work_modes:
   - remote
   - hybrid

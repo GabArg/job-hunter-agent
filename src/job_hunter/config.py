@@ -35,6 +35,11 @@ def load_profile(path: str | Path) -> Profile:
         raise ValueError("scoring_weights must have a positive total")
     return Profile(
         search_queries=_normalized_list(data["search_queries"]),
+        query_groups={
+            str(name).strip().lower(): _normalized_list(values)
+            for name, values in (data.get("query_groups") or {}).items()
+        },
+        career_targets=[dict(target) for target in (data.get("career_targets") or [])],
         target_roles=_normalized_list(data["target_roles"]),
         preferred_locations=_normalized_list(data["preferred_locations"]),
         preferred_work_modes=_normalized_list(data["preferred_work_modes"]),

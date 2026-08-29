@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import json
+import re
 from typing import Any
 
 from ..base import JobSource, fetch_json
@@ -31,6 +33,8 @@ class GenericCareersSource(JobSource):
             self._payload = self._fetcher(self.endpoint)
         payload = self._payload
         items = payload.get(self.jobs_key) if isinstance(payload, dict) else payload
+        if isinstance(payload, str):
+            items = _json_ld_jobs(payload)
         if not isinstance(items, list):
             raise ValueError(f"{self.name} returned an unexpected response")
         results: list[RawJob] = []
@@ -65,3 +69,33 @@ def _location(value: Any) -> str:
     if isinstance(value, dict):
         return str(value.get("name") or value.get("location") or "")
     return str(value or "")
+
+
+def _json_ld_jobs(document: str) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    scripts = re.findall(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', document,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    for script in scripts:
+        try:
+            value = json.loads(script)
+        except json.JSONDecodeError:
+            continue
+        entries = value if isinstance(value, list) else value.get("@graph", [value])
+        for entry in entries:
+            if not isinstance(entry, dict) or entry.get("@type") != "JobPosting":
+                continue
+            location = entry.get("jobLocation") or {}
+            if isinstance(location, list): location = location[0] if location else {}
+            address = location.get("address", {}) if isinstance(location, dict) else {}
+            org = entry.get("hiringOrganization") or {}
+            results.append({
+                "id": entry.get("identifier", {}).get("value") if isinstance(entry.get("identifier"), dict) else entry.get("identifier"),
+                "title": entry.get("title"), "description": entry.get("description"),
+                "company": org.get("name") if isinstance(org, dict) else org,
+                "location": ", ".join(str(address.get(key)) for key in ("addressLocality", "addressRegion", "addressCountry") if address.get(key)),
+                "work_mode": "remote" if entry.get("jobLocationType") == "TELECOMMUTE" else "onsite",
+                "url": entry.get("url"), "published_at": entry.get("datePosted"),
+            })
+    return results

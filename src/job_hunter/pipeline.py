@@ -46,14 +46,17 @@ def run_discovery_pipeline(
     queries: list[str] | None = None,
     location: str | None = None,
     limit: int | None = None,
+    max_age_days: int | None = 14,
 ) -> DiscoveryPipelineResult:
     profile = load_profile(profile_path)
     discovery = DiscoveryAggregator(sources).discover(
-        queries or profile.search_queries, location=location, limit=limit
+        queries or _profile_aliases(profile), location=location, limit=limit,
+        preferred_locations=[location] if location else profile.preferred_locations,
+        max_age_days=max_age_days,
     )
     processed = process_jobs(discovery.jobs, profile_path, database_path)
     return DiscoveryPipelineResult(
-        jobs=processed.jobs,
+        jobs=rank_jobs(processed.jobs),
         inserted=processed.inserted,
         updated=processed.updated,
         discovery=discovery,
@@ -76,6 +79,28 @@ def process_jobs(
         job.reasons = result.as_dict()
         inserted += int(database.upsert(job))
     return PipelineResult(jobs=jobs, inserted=inserted, updated=len(jobs) - inserted)
+
+
+def rank_jobs(jobs: list[Job]) -> list[Job]:
+    priority = {"APPLY": 0, "REVIEW": 1, "REJECT": 2, None: 3}
+    return sorted(
+        jobs,
+        key=lambda job: (
+            priority.get(job.decision, 3), -(job.score or 0),
+            -(job_published_timestamp(job)),
+        ),
+    )
+
+
+def job_published_timestamp(job: Job) -> float:
+    from .discovery.matching import parse_datetime
+    parsed = parse_datetime(job.published_at)
+    return parsed.timestamp() if parsed else 0.0
+
+
+def _profile_aliases(profile) -> list[str]:
+    aliases = [alias for values in profile.query_groups.values() for alias in values]
+    return aliases or profile.search_queries
 
 
 def _read_csv(path: str | Path) -> list[Job]:

@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     description TEXT NOT NULL,
     source TEXT NOT NULL,
     url TEXT NOT NULL UNIQUE,
+    published_at TEXT,
+    discovered_at TEXT NOT NULL,
     score REAL NOT NULL,
     decision TEXT NOT NULL CHECK (decision IN ('APPLY', 'REVIEW', 'REJECT')),
     reasons TEXT NOT NULL,
@@ -38,6 +40,12 @@ class JobDatabase:
     def _initialize(self) -> None:
         with self._connect() as connection:
             connection.execute(SCHEMA)
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(jobs)")}
+            if "published_at" not in columns:
+                connection.execute("ALTER TABLE jobs ADD COLUMN published_at TEXT")
+            if "discovered_at" not in columns:
+                connection.execute("ALTER TABLE jobs ADD COLUMN discovered_at TEXT")
+                connection.execute("UPDATE jobs SET discovered_at = created_at WHERE discovered_at IS NULL")
 
     def upsert(self, job: Job) -> bool:
         values = (
@@ -48,6 +56,8 @@ class JobDatabase:
             job.description,
             job.source,
             job.url,
+            job.published_at,
+            job.discovered_at,
             job.score,
             job.decision,
             json.dumps(job.reasons, ensure_ascii=False),
@@ -57,11 +67,12 @@ class JobDatabase:
             existed = connection.execute("SELECT 1 FROM jobs WHERE url = ?", (job.url,)).fetchone()
             connection.execute(
                 """
-                INSERT INTO jobs (title, company, location, work_mode, description, source, url, score, decision, reasons, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO jobs (title, company, location, work_mode, description, source, url, published_at, discovered_at, score, decision, reasons, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(url) DO UPDATE SET
                     title=excluded.title, company=excluded.company, location=excluded.location,
                     work_mode=excluded.work_mode, description=excluded.description, source=excluded.source,
+                    published_at=excluded.published_at, discovered_at=excluded.discovered_at,
                     score=excluded.score, decision=excluded.decision, reasons=excluded.reasons
                 """,
                 values,
@@ -70,5 +81,9 @@ class JobDatabase:
 
     def list_jobs(self) -> list[dict[str, object]]:
         with self._connect() as connection:
-            rows = connection.execute("SELECT * FROM jobs ORDER BY score DESC, id DESC").fetchall()
+            rows = connection.execute(
+                """SELECT * FROM jobs ORDER BY
+                CASE decision WHEN 'APPLY' THEN 0 WHEN 'REVIEW' THEN 1 ELSE 2 END,
+                score DESC, COALESCE(published_at, '') DESC, id DESC"""
+            ).fetchall()
         return [dict(row) for row in rows]

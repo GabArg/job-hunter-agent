@@ -14,6 +14,10 @@ class Job:
     description: str
     source: str
     url: str
+    published_at: str | None = None
+    discovered_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
+    )
     id: int | None = None
     required_years: float | None = None
     required_english: str | None = None
@@ -30,6 +34,8 @@ class Job:
 @dataclass(frozen=True, slots=True)
 class Profile:
     search_queries: list[str]
+    query_groups: dict[str, list[str]]
+    career_targets: list[dict[str, Any]]
     target_roles: list[str]
     preferred_locations: list[str]
     preferred_work_modes: list[str]

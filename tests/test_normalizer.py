@@ -29,3 +29,11 @@ def test_normalizes_and_extracts_job_signals():
 def test_extracts_semi_senior_before_senior():
     job = normalize_job(make_job(title="Business Analyst Semi-Senior", description="Excel"), ["excel"])
     assert job.seniority == "semi-senior"
+
+
+def test_company_age_is_not_candidate_experience_requirement():
+    job = normalize_job(make_job(
+        title="Business Analyst Ssr",
+        description="Empresa argentina con más de 14 años de experiencia redefiniendo productos.",
+    ))
+    assert job.required_years is None

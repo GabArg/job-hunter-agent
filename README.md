@@ -46,12 +46,36 @@ Descubrir ofertas desde APIs públicas (sin login):
 ```powershell
 python -m job_hunter.cli discover --query "Data Analyst" --limit 10
 python -m job_hunter.cli discover --source remoteok --query "Business Analyst" --limit 5
+python -m job_hunter.cli discover --query-group analytics --max-age-days 14
 ```
 
 Si no se indica `--query`, se usan todas las `search_queries` del perfil. Las fuentes
 fallan de manera aislada, se aplican filtros preliminares de relevancia y luego cada
 oferta aceptada pasa por el normalizador, scorer y SQLite. Los adaptadores respetan
 los endpoints públicos: no sortean login, CAPTCHA, rate limits ni controles anti-bot.
+
+### Career targets y ATS públicos
+
+`career_targets` permite incorporar empresas sin hardcodearlas. Cada target define
+`company`, `ats`, `board_token` y, opcionalmente, `careers_url`. Se soportan los
+feeds públicos de `greenhouse`, `lever`, `ashby` y `workable`; `generic` procesa
+career pages HTTPS con datos estructurados JSON-LD `JobPosting`.
+
+```yaml
+career_targets:
+  - company: Example Company
+    ats: lever
+    board_token: example-company
+    careers_url: https://jobs.lever.co/example-company
+```
+
+No se envían postulaciones. Si un futuro conector necesita una API key, debe leerla
+desde una variable de entorno y nunca desde un archivo versionado.
+
+Discovery separa coincidencia potencial de título de la decisión final. Antes del
+scoring descarta publicaciones antiguas y ubicaciones incompatibles, incluyendo
+`US only`, `EU only`, `UK only` y `Canada only`. Un `Remote` sin evidencia explícita
+de Argentina o LATAM no se considera compatible por defecto.
 
 El dashboard permite elegir el CSV, el perfil y la base de datos desde la barra lateral, ejecutar el pipeline y filtrar los resultados.
 
