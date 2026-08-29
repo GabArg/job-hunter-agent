@@ -1,0 +1,9 @@
+entries:
+  - id: demo_course_entry
+    type: COURSE
+    institution: Example Academy
+    program: Advanced Analytics Demo
+    status: completed
+    completed_at: 2026-09
+    skills: [SQL, Analytics]
+    evidence: [manual_confirmation]

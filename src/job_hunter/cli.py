@@ -10,6 +10,7 @@ from .discovery.factory import build_sources
 from .pipeline import run_discovery_pipeline, run_pipeline
 from .cv import HTMLCVRenderer, adapt_cv, load_master_cv
 from .database import JobDatabase
+from .knowledge import KnowledgeUpdater, ProposalGenerator
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,6 +41,26 @@ def build_parser() -> argparse.ArgumentParser:
     cv.add_argument("--output", default="outputs", help="Output directory")
     cv.add_argument("--database", default="data/jobs.db", help="SQLite database path")
     cv.add_argument("--allow-reject", action="store_true", help="Explicitly allow CV for a REJECT job")
+    knowledge = subparsers.add_parser("knowledge", help="Manage approval-gated factual updates")
+    knowledge.add_argument("--master-cv", default="private/master_cv.yaml")
+    knowledge.add_argument("--proposals", default="private/update_proposals.yaml")
+    knowledge.add_argument("--audit", default="private/knowledge_audit.jsonl")
+    knowledge.add_argument("--backups", default="private/backups")
+    actions = knowledge.add_subparsers(dest="knowledge_action", required=True)
+    actions.add_parser("list", help="List proposals")
+    add = actions.add_parser("add", help="Create a DRAFT proposal")
+    add.add_argument("--type", required=True, choices=("COURSE", "CERTIFICATION", "PROJECT", "PROJECT_UPDATE", "SKILL", "EXPERIENCE", "EXPERIENCE_UPDATE", "EDUCATION", "LANGUAGE", "ACHIEVEMENT"))
+    add.add_argument("--title", required=True)
+    add.add_argument("--institution"); add.add_argument("--program"); add.add_argument("--status")
+    add.add_argument("--company"); add.add_argument("--role"); add.add_argument("--start-date"); add.add_argument("--end-date")
+    add.add_argument("--language"); add.add_argument("--level"); add.add_argument("--dates"); add.add_argument("--location")
+    add.add_argument("--project"); add.add_argument("--experience"); add.add_argument("--fact")
+    add.add_argument("--category"); add.add_argument("--completed-at")
+    add.add_argument("--evidence", action="append", default=[])
+    add.add_argument("--skill", action="append", default=[])
+    add.add_argument("--technology", action="append", default=[])
+    for name in ("validate", "approve", "reject", "preview", "apply"):
+        action = actions.add_parser(name); action.add_argument("proposal_id")
     return parser
 
 
@@ -72,7 +93,7 @@ def main() -> None:
                 f"pre_score_rejected={stat.rejected_pre_score} scored={stat.scored} "
                 f"duplicates={stat.duplicates} status={status}"
             )
-    else:
+    elif args.command == "cv":
         job = JobDatabase(args.database).get_job(args.job_id, args.url)
         if job is None:
             raise SystemExit("Job not found in SQLite")
@@ -81,8 +102,48 @@ def main() -> None:
         output = HTMLCVRenderer().render_to_file(adapted, Path(args.output) / f"cv-{job.id}-{safe_name}.html")
         print(f"CV {adapted.validation_status} | {adapted.approval_state} | {output}")
         return
+    else:
+        updater = KnowledgeUpdater(args.master_cv, args.proposals, args.audit, args.backups)
+        if args.knowledge_action == "list":
+            for proposal in updater.store.list():
+                print(f"{proposal.id} | {proposal.type.value} | {proposal.status.value} | {proposal.title}")
+            return
+        if args.knowledge_action == "add":
+            entry = {key: value for key, value in {
+                "type": args.type, "title": args.title, "institution": args.institution,
+                "program": args.program or args.title, "status": args.status,
+                "company": args.company, "role": args.role, "start_date": args.start_date,
+                "end_date": args.end_date, "language": args.language, "level": args.level,
+                "dates": args.dates, "location": args.location,
+                "completed_at": args.completed_at, "project": args.project,
+                "experience": args.experience, "fact": args.fact, "category": args.category,
+                "evidence": args.evidence, "skills": args.skill, "technologies": args.technology,
+            }.items() if value not in (None, [], "")}
+            reserved = {identifier for proposal in updater.store.list() for identifier in _proposal_ids(proposal.proposed_changes)}
+            proposal = updater.create(ProposalGenerator().generate(entry, args.master_cv, reserved))
+            print(f"{proposal.id} | {proposal.status.value} | {proposal.title}")
+            return
+        if args.knowledge_action == "preview":
+            print(updater.preview(args.proposal_id))
+            return
+        operation = getattr(updater, args.knowledge_action)
+        if args.knowledge_action == "apply":
+            print(updater.preview(args.proposal_id))
+        proposal = operation(args.proposal_id)
+        print(f"{proposal.id} | {proposal.status.value}")
+        if proposal.validation_errors:
+            print("Errors: " + "; ".join(proposal.validation_errors))
+        return
     for job in result.jobs[:20]:
         print(f"{job.decision:6} | {job.score:6.2f} | {job.company} | {job.title} | {job.url}")
+
+
+def _proposal_ids(value):
+    if isinstance(value, dict):
+        if value.get("id"): yield str(value["id"])
+        for child in value.values(): yield from _proposal_ids(child)
+    elif isinstance(value, list):
+        for child in value: yield from _proposal_ids(child)
 
 
 if __name__ == "__main__":

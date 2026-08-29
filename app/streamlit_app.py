@@ -12,6 +12,7 @@ from job_hunter.discovery.factory import build_sources
 from job_hunter.pipeline import run_discovery_pipeline, run_pipeline
 from job_hunter.cv import HTMLCVRenderer, adapt_cv, load_master_cv
 from job_hunter.cv.models import CVApprovalState
+from job_hunter.knowledge import KnowledgeUpdater
 
 st.set_page_config(page_title="Job Hunter Agent", layout="wide")
 st.title("Job Hunter Agent")
@@ -91,6 +92,46 @@ if last_discovery:
         for name, stat in last_discovery["stats"].items()
     ]
     st.dataframe(source_rows, hide_index=True, use_container_width=True)
+
+st.header("Knowledge Base")
+st.caption("Las propuestas nunca ingresan al master sin aprobación y aplicación explícitas.")
+knowledge = KnowledgeUpdater(
+    master_cv_path, "private/update_proposals.yaml", "private/knowledge_audit.jsonl", "private/backups"
+)
+try:
+    proposals = knowledge.store.list()
+except Exception as exc:
+    proposals = []
+    st.error(f"No se pudieron cargar las propuestas: {exc}")
+
+if not proposals:
+    st.info("No hay propuestas registradas.")
+else:
+    st.dataframe([{
+        "ID": item.id, "Tipo": item.type.value, "Título": item.title,
+        "Estado": item.status.value, "Evidencia": ", ".join(item.evidence),
+        "Errores": "; ".join(item.validation_errors),
+    } for item in proposals], hide_index=True, use_container_width=True)
+    selected_proposal_id = st.selectbox("Propuesta", [item.id for item in proposals])
+    selected_proposal = knowledge.store.get(selected_proposal_id)
+    st.json(selected_proposal.proposed_changes)
+    action_columns = st.columns(3)
+    if action_columns[0].button("Validar"):
+        try: st.success(f"Estado: {knowledge.validate(selected_proposal_id).status.value}"); st.rerun()
+        except Exception as exc: st.error(str(exc))
+    if action_columns[1].button("Aprobar"):
+        try: st.success(f"Estado: {knowledge.approve(selected_proposal_id).status.value}"); st.rerun()
+        except Exception as exc: st.error(str(exc))
+    if action_columns[2].button("Rechazar"):
+        try: st.success(f"Estado: {knowledge.reject(selected_proposal_id).status.value}"); st.rerun()
+        except Exception as exc: st.error(str(exc))
+    if selected_proposal.status.value == "APPROVED":
+        st.markdown("**Diff propuesto (sólo el bloque afectado)**")
+        st.code(knowledge.preview(selected_proposal_id), language="diff")
+        confirmed = st.checkbox("Confirmo aplicar esta propuesta al master privado")
+        if st.button("Aplicar al Master", disabled=not confirmed, type="primary"):
+            try: st.success(f"Estado: {knowledge.apply(selected_proposal_id).status.value}"); st.rerun()
+            except Exception as exc: st.error(f"No se aplicó el cambio; se ejecutó rollback: {exc}")
 
 if not Path(database_path).exists():
     st.info("Ejecutá el pipeline para crear la base de datos.")
