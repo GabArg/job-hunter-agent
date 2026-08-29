@@ -8,6 +8,7 @@ import yaml
 from .models import Profile
 
 REQUIRED_KEYS = {
+    "search_queries",
     "target_roles",
     "preferred_locations",
     "preferred_work_modes",
@@ -33,6 +34,7 @@ def load_profile(path: str | Path) -> Profile:
     if sum(weights.values()) <= 0:
         raise ValueError("scoring_weights must have a positive total")
     return Profile(
+        search_queries=_normalized_list(data["search_queries"]),
         target_roles=_normalized_list(data["target_roles"]),
         preferred_locations=_normalized_list(data["preferred_locations"]),
         preferred_work_modes=_normalized_list(data["preferred_work_modes"]),

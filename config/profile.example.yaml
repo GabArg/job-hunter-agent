@@ -1,4 +1,13 @@
 # Perfil ficticio. Copiar a profile.yaml antes de incluir preferencias reales.
+search_queries:
+  - Data Analyst
+  - BI Analyst
+  - Business Analyst
+  - Pricing Analyst
+  - Operations Analyst
+  - Reporting Analyst
+  - Commercial Analyst
+  - Analytics Analyst
 target_roles:
   - pricing analyst
   - business analyst

@@ -29,6 +29,7 @@ class Job:
 
 @dataclass(frozen=True, slots=True)
 class Profile:
+    search_queries: list[str]
     target_roles: list[str]
     preferred_locations: list[str]
     preferred_work_modes: list[str]

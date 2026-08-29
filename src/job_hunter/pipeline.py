@@ -6,6 +6,8 @@ from pathlib import Path
 
 from .config import load_profile
 from .database import JobDatabase
+from .discovery.aggregator import DiscoveryAggregator, DiscoveryResult
+from .discovery.base import JobSource
 from .models import Job
 from .normalizer import normalize_job
 from .scorer import score_job
@@ -20,14 +22,49 @@ class PipelineResult:
     updated: int
 
 
+@dataclass(frozen=True, slots=True)
+class DiscoveryPipelineResult:
+    jobs: list[Job]
+    inserted: int
+    updated: int
+    discovery: DiscoveryResult
+
+
 def run_pipeline(
     input_path: str | Path,
     profile_path: str | Path,
     database_path: str | Path,
 ) -> PipelineResult:
+    jobs = _read_csv(input_path)
+    return process_jobs(jobs, profile_path, database_path)
+
+
+def run_discovery_pipeline(
+    sources: list[JobSource],
+    profile_path: str | Path,
+    database_path: str | Path,
+    queries: list[str] | None = None,
+    location: str | None = None,
+    limit: int | None = None,
+) -> DiscoveryPipelineResult:
+    profile = load_profile(profile_path)
+    discovery = DiscoveryAggregator(sources).discover(
+        queries or profile.search_queries, location=location, limit=limit
+    )
+    processed = process_jobs(discovery.jobs, profile_path, database_path)
+    return DiscoveryPipelineResult(
+        jobs=processed.jobs,
+        inserted=processed.inserted,
+        updated=processed.updated,
+        discovery=discovery,
+    )
+
+
+def process_jobs(
+    jobs: list[Job], profile_path: str | Path, database_path: str | Path
+) -> PipelineResult:
     profile = load_profile(profile_path)
     database = JobDatabase(database_path)
-    jobs = _read_csv(input_path)
     inserted = 0
     for job in jobs:
         if not job.url:

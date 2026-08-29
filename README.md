@@ -41,6 +41,18 @@ Levantar el dashboard:
 streamlit run app/streamlit_app.py
 ```
 
+Descubrir ofertas desde APIs públicas (sin login):
+
+```powershell
+python -m job_hunter.cli discover --query "Data Analyst" --limit 10
+python -m job_hunter.cli discover --source remoteok --query "Business Analyst" --limit 5
+```
+
+Si no se indica `--query`, se usan todas las `search_queries` del perfil. Las fuentes
+fallan de manera aislada, se aplican filtros preliminares de relevancia y luego cada
+oferta aceptada pasa por el normalizador, scorer y SQLite. Los adaptadores respetan
+los endpoints públicos: no sortean login, CAPTCHA, rate limits ni controles anti-bot.
+
 El dashboard permite elegir el CSV, el perfil y la base de datos desde la barra lateral, ejecutar el pipeline y filtrar los resultados.
 
 ## Tests
