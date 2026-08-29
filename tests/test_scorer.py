@@ -46,3 +46,15 @@ def test_explicitly_allowed_senior_is_not_rejected_for_seniority():
     job = Job("Senior Data Analyst", "Test", "Remote", "Remote", "SQL", "test", "https://example.com/s")
     result = score_job(normalize_job(job, profile.skills), profile)
     assert not any("Senioridad" in reason for reason in result.hard_reject_reasons)
+
+
+def test_spanish_role_matches_with_junior_between_role_tokens():
+    from dataclasses import replace
+
+    profile = replace(PROFILE, target_roles=[*PROFILE.target_roles, "analista de pricing"])
+    job = Job(
+        "Analista Junior Pricing & Marketplace", "Test", "Buenos Aires", "Hybrid",
+        "Excel y pricing", "test", "https://example.com/pricing",
+    )
+    result = score_job(normalize_job(job, profile.skills), profile)
+    assert "El puesto coincide con un rol objetivo" in result.positive_reasons

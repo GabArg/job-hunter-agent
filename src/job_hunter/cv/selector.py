@@ -17,10 +17,12 @@ TERM_TAGS = {
     "power bi": "power-bi", "kpis": "kpi", "kpi": "kpi", "procesos": "processes",
     "mejora de procesos": "processes", "process": "processes", "stakeholders": "stakeholders",
     "reporting": "reporting", "analisis comercial": "commercial", "análisis comercial": "commercial",
+    "reportes": "reporting", "decisiones": "decision-making",
     "sql": "sql", "python": "python", "excel": "excel", "pricing": "pricing",
     "costos": "costs", "logistica": "logistics", "logística": "logistics", "riesgo": "risk",
     "fintech": "fintech", "quantitative": "quantitative", "churn": "churn",
     "etl": "etl", "eda": "eda",
+    "inteligencia artificial": "generative-ai", "ia": "generative-ai",
 }
 IMPACT_TAGS = {
     "business-impact", "optimization", "costs", "profitability", "decision-making", "customers",
@@ -36,6 +38,7 @@ class Selection:
     summary: list[FactualText]
     experience_facts: dict[int, list[FactualText]]
     project_facts: dict[int, list[FactualText]]
+    course_indices: list[int]
     omitted_ids: list[str]
 
 
@@ -61,6 +64,8 @@ def select_facts(job: Job, master: MasterCV, content_mode: str = "concise") -> S
     limits = [4, 3, 2] if content_mode == "concise" else [5, 4, 3]
     for index, entry in enumerate(master.experience):
         limit = limits[min(index, len(limits) - 1)]
+        if "pricing" in keywords and any("pricing" in {_normalize_tag(tag) for tag in fact.tags} for fact in entry.facts):
+            limit = max(limit, 4)
         chosen = _diverse_top([*entry.facts, *entry.achievements], keywords, limit)
         if not chosen and (entry.facts or entry.achievements):
             chosen = [*entry.facts, *entry.achievements][:1]
@@ -70,15 +75,25 @@ def select_facts(job: Job, master: MasterCV, content_mode: str = "concise") -> S
     projects: dict[int, list[FactualText]] = {}
     candidates = []
     for index, entry in enumerate(master.projects):
-        chosen = _diverse_top([*entry.facts, *entry.metrics], keywords, 2)
+        if entry.metrics:
+            chosen = [*_diverse_top(entry.facts, keywords, 1), *_diverse_top(entry.metrics, keywords, 1)]
+        else:
+            chosen = _diverse_top(entry.facts, keywords, 2)
         if chosen:
             candidates.append((_project_score(entry, chosen, keywords, explicit), index, chosen))
-    project_limit = 3 if content_mode == "concise" else 5
+    project_limit = (2 if "pricing" in keywords else 3) if content_mode == "concise" else 5
     for _, index, chosen in sorted(candidates, key=lambda item: (-item[0], item[1]))[:project_limit]:
         projects[index] = chosen
         selected_ids.update(fact.id for fact in chosen)
+    course_scores = []
+    for index, course in enumerate(master.courses):
+        score = sum(relevance_score(fact, keywords) for fact in course.facts)
+        if score:
+            course_scores.append((score, index))
+            selected_ids.update(fact.id for fact in course.facts if relevance_score(fact, keywords))
+    course_indices = [index for _, index in sorted(course_scores, key=lambda item: (-item[0], item[1]))[:3]]
     omitted = [identifier for identifier in master.factual_ids if identifier not in selected_ids]
-    return Selection(keywords, explicit, summary, experience, projects, omitted)
+    return Selection(keywords, explicit, summary, experience, projects, course_indices, omitted)
 
 
 def select_skills(job: Job, master: MasterCV, selection: Selection, limit: int = 12) -> list[str]:
@@ -92,6 +107,9 @@ def select_skills(job: Job, master: MasterCV, selection: Selection, limit: int =
             "business-analytics": "business-analysis", "operations-analytics": "operations",
             "kpi-design": "kpi", "process-improvement": "processes",
             "stakeholder-management": "stakeholders", "decision-making": "decision-making",
+            "sales-analysis": "sales", "profitability-analysis": "profitability",
+            "cost-analysis": "costs", "customer-analysis": "customers",
+            "generative-ai": "generative-ai",
         }
         keyword_tags = {_normalize_tag(tag) for tag in selection.keywords}
         adjacent = 4 if skill_tag in keyword_tags or adjacent_aliases.get(skill_tag) in keyword_tags else 0
@@ -111,7 +129,7 @@ def relevance_score(value: str | FactualText, keywords: list[str]) -> int:
     text = value.text if isinstance(value, FactualText) else str(value)
     tags = {_normalize_tag(tag) for tag in value.tags} if isinstance(value, FactualText) else set()
     normalized_text = _normalize(text)
-    return sum(4 if _normalize_tag(keyword) in tags else int(_tag_text(keyword) in normalized_text) for keyword in keywords)
+    return sum(4 if _normalize_tag(keyword) in tags else int(_keyword_in_text(keyword, normalized_text)) for keyword in keywords)
 
 
 def semantic_duplicate(first: FactualText, second: FactualText) -> bool:
@@ -127,6 +145,8 @@ def semantic_duplicate(first: FactualText, second: FactualText) -> bool:
 
 def _summary_facts(facts: list[FactualText], keywords: list[str]) -> list[FactualText]:
     desired = ["summary_01", "summary_02", "summary_07", "summary_03", "summary_05", "summary_08"]
+    if "pricing" in keywords or "commercial" in keywords:
+        desired.insert(2, "summary_04")
     by_id = {fact.id: fact for fact in facts}
     selected = [by_id[identifier] for identifier in desired if identifier in by_id]
     return selected or _diverse_top(facts, keywords, 6)
@@ -164,7 +184,20 @@ def _impact_score(fact: FactualText) -> int:
     tags = {_normalize_tag(tag) for tag in fact.tags}
     metric_bonus = 4 if fact.kind == "metric" else 0
     quantified = 3 if re.search(r"\d", fact.text) else 0
-    return metric_bonus + quantified + 2 * len(tags & IMPACT_TAGS)
+    economic = 4 if any(term in _normalize(fact.text) for term in ("ahorro", "cost", "ingreso", "revenue")) else 0
+    return metric_bonus + quantified + economic + 2 * len(tags & IMPACT_TAGS)
+
+
+def _keyword_in_text(keyword: str, text: str) -> bool:
+    aliases = {
+        "generative-ai": ("inteligencia artificial", " ia ", "agentes de ia", "generative ai"),
+        "reporting": ("reporting", "reporte", "reportes"),
+        "decision-making": ("decision", "decisiones"),
+        "processes": ("proceso", "procesos"),
+    }
+    terms = aliases.get(_normalize_tag(keyword), (_tag_text(keyword),))
+    padded = f" {text} "
+    return any(term in padded for term in terms)
 
 
 def _skill_explicit(skill: str, tag: str, text: str, explicit_tags: list[str]) -> bool:

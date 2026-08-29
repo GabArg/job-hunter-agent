@@ -78,7 +78,8 @@ def adapt_cv(
         job.id or job.url, job.title, job.company, float(job.score or 0), dict(master.personal),
         summary, summary_ids,
         [section for _, _, section in sorted(experiences, key=lambda item: (-item[0], item[1]))],
-        projects, list(master.education), select_skills(job, master, selection, 12 if content_mode == "concise" else 18),
+        projects, list(master.education), [master.courses[index] for index in selection.course_indices],
+        select_skills(job, master, selection, 12 if content_mode == "concise" else 18),
         list(master.languages), selection.keywords, selection.omitted_ids, content_mode,
     )
     validate_cv(cv, master)

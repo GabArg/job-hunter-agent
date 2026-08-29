@@ -37,3 +37,11 @@ def test_company_age_is_not_candidate_experience_requirement():
         description="Empresa argentina con más de 14 años de experiencia redefiniendo productos.",
     ))
     assert job.required_years is None
+
+
+def test_advanced_excel_is_not_advanced_english():
+    job = normalize_job(make_job(
+        title="Analista Junior Pricing",
+        description="Se requiere manejo avanzado de Excel y capacidad analítica.",
+    ))
+    assert job.required_english is None

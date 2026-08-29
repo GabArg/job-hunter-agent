@@ -79,3 +79,23 @@ def test_editorial_generation_is_deterministic_and_master_unchanged():
     master = load_master_cv(MASTER_PATH)
     assert adapt_cv(target(), master) == adapt_cv(deepcopy(target()), master)
     assert MASTER_PATH.read_bytes() == before
+
+
+def test_pricing_marketplace_focus_uses_only_supported_adjacent_evidence():
+    job = Job(
+        "Analista Junior Pricing & Marketplace", "GA.MA Italy", "Buenos Aires", "hybrid",
+        "Precios, promociones, competencia, reportes, decisiones, Excel avanzado e inteligencia artificial.",
+        "test", "https://example.com/gama", id=3701, score=79, decision="APPLY",
+    )
+    cv = adapt_cv(job, load_master_cv(MASTER_PATH))
+    assert [project.name for project in cv.project_sections] == [
+        "AlixPartners Data Challenge 2026 — Bonsai Corp", "Business Intelligence & Automatización"
+    ]
+    assert {"Excel", "Pricing", "Reporting", "Generative AI"} <= set(cv.skills)
+    rendered_text = " ".join(
+        [cv.professional_summary, *(bullet.text for section in cv.experience_sections for bullet in section.bullets)]
+    ).lower()
+    assert "experiencia en marketplaces" not in rendered_text
+    despachito = next(section for section in cv.experience_sections if section.company == "El Despachito")
+    assert "exp_02_fact_05" in {identifier for bullet in despachito.bullets for identifier in bullet.source_fact_ids}
+    assert cv.validation_status == "VALID"

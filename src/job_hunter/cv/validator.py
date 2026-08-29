@@ -46,6 +46,8 @@ def validate_cv(cv: AdaptedCV, master: MasterCV) -> None:
         errors.append("CV contains a company absent from master CV")
     if any(entry.institution not in institutions for entry in cv.education):
         errors.append("CV contains an institution absent from master CV")
+    if any(entry.institution not in institutions for entry in cv.courses):
+        errors.append("CV contains a course institution absent from master CV")
     used_technologies = {
         technology for section in [*cv.experience_sections, *cv.project_sections]
         for technology in section.technologies

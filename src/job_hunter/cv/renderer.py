@@ -23,6 +23,7 @@ class HTMLCVRenderer:
             "{{EXPERIENCE}}": _experience(cv),
             "{{PROJECTS}}": _projects(cv),
             "{{EDUCATION}}": _education(cv),
+            "{{COURSES}}": _courses(cv),
             "{{LANGUAGES}}": ", ".join(
                 f"{_e(item.language)}: {_e(item.level)}" for item in cv.languages
             ),
@@ -65,6 +66,16 @@ def _education(cv: AdaptedCV) -> str:
         f'<span>{_e(item.dates)}</span></div><div>{_e(item.institution)}'
         f' · {_e(item.status)}</div></section>' for item in cv.education
     )
+
+
+def _courses(cv: AdaptedCV) -> str:
+    if not cv.courses:
+        return ""
+    entries = "".join(
+        f'<section class="entry"><strong>{_e(item.program)}</strong>'
+        f'<div>{_e(item.institution)} · {_e(item.status)}</div></section>' for item in cv.courses
+    )
+    return f"<h2>Formación complementaria</h2>{entries}"
 
 
 def _bullets(bullets) -> str:

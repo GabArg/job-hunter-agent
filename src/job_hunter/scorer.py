@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+import unicodedata
+
 from .models import Job, Profile, ScoreResult
 
 ENGLISH_RANK = {
@@ -20,7 +23,7 @@ def score_job(job: Job, profile: Profile) -> ScoreResult:
     positive: list[str] = []
     hard_rejects: list[str] = []
 
-    role_match = any(role in job.title for role in profile.target_roles)
+    role_match = any(_role_matches(job.title, role) for role in profile.target_roles)
     if role_match:
         earned += weights.get("role", 0)
         positive.append("El puesto coincide con un rol objetivo")
@@ -68,3 +71,16 @@ def score_job(job: Job, profile: Profile) -> ScoreResult:
     else:
         decision = "REVIEW"
     return ScoreResult(score, decision, matched, missing, hard_rejects, positive)
+
+
+def _role_matches(title: str, target_role: str) -> bool:
+    def tokens(value: str) -> set[str]:
+        value = unicodedata.normalize("NFKD", value.lower())
+        value = "".join(character for character in value if not unicodedata.combining(character))
+        normalized = []
+        for token in re.findall(r"[a-z0-9]+", value):
+            if token in {"de", "del", "y", "and"}: continue
+            normalized.append("analyst" if token in {"analyst", "analista"} else token)
+        return set(normalized)
+    required = tokens(target_role)
+    return bool(required) and required <= tokens(title)

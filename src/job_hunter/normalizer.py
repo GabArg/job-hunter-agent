@@ -38,7 +38,7 @@ def normalize_job(job: Job, known_skills: list[str] | None = None) -> Job:
     job.url = (job.url or "").strip()
     searchable = clean_text(f"{job.title} {job.description}")
     job.seniority = _first_match(searchable, SENIORITY_PATTERNS)
-    job.required_english = _first_match(searchable, ENGLISH_PATTERNS)
+    job.required_english = _extract_english(searchable)
     job.required_years = _extract_years(searchable)
     job.detected_skills = [
         skill for skill in (known_skills or []) if _contains_term(searchable, clean_text(skill))
@@ -76,6 +76,14 @@ def _extract_years(text: str) -> float | None:
         for match in re.findall(pattern, text)
     ]
     return max(values) if values else None
+
+
+def _extract_english(text: str) -> str | None:
+    language = r"(?:ingles|inglés|english)"
+    for level, pattern in ENGLISH_PATTERNS.items():
+        if re.search(rf"{language}.{{0,30}}{pattern}|{pattern}.{{0,20}}{language}", text):
+            return level
+    return None
 
 
 def _contains_term(text: str, term: str) -> bool:

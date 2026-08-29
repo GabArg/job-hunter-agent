@@ -145,6 +145,7 @@ class AdaptedCV:
     experience_sections: list[ExperienceSection]
     project_sections: list[ProjectSection]
     education: list[EducationEntry]
+    courses: list[CourseEntry]
     skills: list[str]
     languages: list[LanguageEntry]
     selected_keywords: list[str]
