@@ -24,7 +24,7 @@ class HTMLCVRenderer:
             "{{PROJECTS}}": _projects(cv),
             "{{EDUCATION}}": _education(cv),
             "{{LANGUAGES}}": ", ".join(
-                f"{_e(item.get('language', ''))}: {_e(item.get('level', ''))}" for item in cv.languages
+                f"{_e(item.language)}: {_e(item.level)}" for item in cv.languages
             ),
         }
         for marker, value in replacements.items():
@@ -61,9 +61,9 @@ def _projects(cv: AdaptedCV) -> str:
 
 def _education(cv: AdaptedCV) -> str:
     return "".join(
-        f'<section class="entry"><div class="entry-head"><strong>{_e(item.get("program", ""))}</strong>'
-        f'<span>{_e(item.get("dates", ""))}</span></div><div>{_e(item.get("institution", ""))}'
-        f' · {_e(item.get("status", ""))}</div></section>' for item in cv.education
+        f'<section class="entry"><div class="entry-head"><strong>{_e(item.program)}</strong>'
+        f'<span>{_e(item.dates)}</span></div><div>{_e(item.institution)}'
+        f' · {_e(item.status)}</div></section>' for item in cv.education
     )
 
 

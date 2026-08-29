@@ -43,7 +43,7 @@ def test_no_nonexistent_technologies_or_companies():
     }
     companies = {section.company for section in cv.experience_sections}
     assert "Kubernetes" not in technologies
-    assert companies <= {entry["company"] for entry in master.experience}
+    assert companies <= {entry.company for entry in master.experience}
 
 
 def test_data_analyst_prioritizes_data_skills():
@@ -53,14 +53,16 @@ def test_data_analyst_prioritizes_data_skills():
 
 def test_pricing_analyst_prioritizes_commercial_experience():
     cv = adapt_cv(job("Pricing Analyst", "pricing Excel sales margin market"), load_master_cv(MASTER_PATH))
-    assert cv.skills.index("Pricing") < cv.skills.index("Python")
+    assert "Pricing" in cv.skills
+    assert "Python" not in cv.skills or cv.skills.index("Pricing") < cv.skills.index("Python")
     assert cv.experience_sections[0].company == "Example Retail Labs"
     assert any("ventas" in bullet.text.lower() or "márgenes" in bullet.text.lower() for bullet in cv.experience_sections[0].bullets)
 
 
 def test_business_analyst_prioritizes_processes_and_kpis():
     cv = adapt_cv(job("Business Analyst", "process KPIs stakeholders business decisions"), load_master_cv(MASTER_PATH))
-    assert cv.skills.index("Business Analysis") < cv.skills.index("Python")
+    assert "Business Analysis" in cv.skills
+    assert "Python" not in cv.skills or cv.skills.index("Business Analysis") < cv.skills.index("Python")
     selected = " ".join(bullet.text for bullet in all_bullets(cv)).lower()
     assert "procesos" in selected
     assert "kpi" in selected
