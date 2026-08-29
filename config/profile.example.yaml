@@ -1,0 +1,33 @@
+# Perfil ficticio. Copiar a profile.yaml antes de incluir preferencias reales.
+target_roles:
+  - pricing analyst
+  - business analyst
+  - data analyst
+preferred_locations:
+  - buenos aires
+  - argentina
+  - remote
+preferred_work_modes:
+  - remote
+  - hybrid
+max_required_years: 2
+allowed_seniority:
+  - junior
+  - semi-senior
+english_level: intermediate
+skills:
+  - excel
+  - sql
+  - power bi
+  - pricing
+  - business analysis
+hard_reject_rules:
+  reject_unlisted_seniority: true
+  reject_excess_experience: true
+  reject_insufficient_english: true
+scoring_weights:
+  role: 30
+  skills: 35
+  location: 15
+  work_mode: 10
+  seniority: 10

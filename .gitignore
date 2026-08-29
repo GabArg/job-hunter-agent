@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.env
+config/profile.yaml
+data/*.db
+data/*.sqlite*
+.streamlit/secrets.toml
+dist/
+build/
+*.egg-info/
