@@ -1,86 +1,60 @@
 from __future__ import annotations
 
-import re
-import unicodedata
-
 from .models import Job, Profile, ScoreResult
+from .semantics import canonicalize_terms, display_concepts, expand_candidate_capabilities, roles_match
 
-ENGLISH_RANK = {
-    "none": 0,
-    "basic": 1,
-    "intermediate": 2,
-    "advanced": 3,
-    "fluent": 4,
-    "c1": 4,
-    "c2": 5,
-}
+ENGLISH_RANK = {"none": 0, "basic": 1, "intermediate": 2, "advanced": 3, "fluent": 4, "c1": 4, "c2": 5}
 DEFAULT_REJECTED_SENIORITIES = {"senior", "lead", "staff", "principal"}
+EMPTY_REASON_VALUES = {"", "-", "—", "none", "n/a", "null", "no"}
 
 
 def score_job(job: Job, profile: Profile) -> ScoreResult:
-    weights = profile.scoring_weights
-    earned = 0.0
-    positive: list[str] = []
-    hard_rejects: list[str] = []
-
-    role_match = any(_role_matches(job.title, role) for role in profile.target_roles)
+    weights, earned = profile.scoring_weights, 0.0
+    positive: list[str] = []; hard_rejects: list[str] = []
+    role_match = any(roles_match(job.title, role, job.description) for role in profile.target_roles)
     if role_match:
-        earned += weights.get("role", 0)
-        positive.append("El puesto coincide con un rol objetivo")
+        earned += weights.get("role", 0); positive.append("El puesto coincide con un rol objetivo")
 
-    matched = [skill for skill in profile.skills if skill in job.detected_skills]
-    missing = [skill for skill in profile.skills if skill not in matched]
-    skill_ratio = len(matched) / len(profile.skills) if profile.skills else 1.0
+    requirements = list(dict.fromkeys(job.job_requirements))
+    configured_skills = canonicalize_terms(profile.skills)
+    candidate_skills = expand_candidate_capabilities(profile.skills)
+    matched = [concept for concept in requirements if concept in candidate_skills]
+    missing = [concept for concept in requirements if concept not in candidate_skills]
+    # Only requirements present in the offer participate in this component. Profile targets never become gaps.
+    skill_ratio = len(matched) / len(requirements) if requirements else 0.0
     earned += weights.get("skills", 0) * skill_ratio
-    if matched:
-        positive.append(f"Habilidades coincidentes: {', '.join(matched)}")
+    if matched: positive.append(f"Requisitos coincidentes: {', '.join(display_concepts(matched))}")
 
     if any(location in job.location for location in profile.preferred_locations):
-        earned += weights.get("location", 0)
-        positive.append("Ubicación preferida")
+        earned += weights.get("location", 0); positive.append("Ubicación preferida")
     if job.work_mode in profile.preferred_work_modes:
-        earned += weights.get("work_mode", 0)
-        positive.append("Modalidad preferida")
+        earned += weights.get("work_mode", 0); positive.append("Modalidad preferida")
     if job.seniority is None or job.seniority in profile.allowed_seniority:
-        earned += weights.get("seniority", 0)
-        positive.append("Senioridad compatible")
+        earned += weights.get("seniority", 0); positive.append("Senioridad compatible")
 
     rules = profile.hard_reject_rules
-    if rules.get("reject_unlisted_seniority", True):
-        if job.seniority in DEFAULT_REJECTED_SENIORITIES and job.seniority not in profile.allowed_seniority:
-            hard_rejects.append(f"Senioridad no permitida: {job.seniority}")
-    if rules.get("reject_excess_experience", True):
-        if job.required_years is not None and job.required_years > profile.max_required_years:
-            hard_rejects.append(
-                f"Experiencia requerida ({job.required_years:g} años) supera el máximo ({profile.max_required_years:g})"
-            )
+    if rules.get("reject_unlisted_seniority", True) and job.seniority in DEFAULT_REJECTED_SENIORITIES and job.seniority not in profile.allowed_seniority:
+        hard_rejects.append(f"Senioridad no permitida: {job.seniority}")
+    if rules.get("reject_excess_experience", True) and job.required_years is not None and job.required_years > profile.max_required_years:
+        hard_rejects.append(f"Experiencia requerida ({job.required_years:g} años) supera el máximo ({profile.max_required_years:g})")
     if rules.get("reject_insufficient_english", True) and job.required_english:
-        required_rank = ENGLISH_RANK.get(job.required_english, 0)
-        profile_rank = ENGLISH_RANK.get(profile.english_level, 0)
+        required_rank, profile_rank = ENGLISH_RANK.get(job.required_english, 0), ENGLISH_RANK.get(profile.english_level, 0)
         if required_rank >= ENGLISH_RANK["advanced"] and profile_rank < required_rank:
-            hard_rejects.append(
-                f"Inglés requerido ({job.required_english}) supera el nivel del perfil ({profile.english_level})"
-            )
+            hard_rejects.append(f"Inglés requerido ({job.required_english}) supera el nivel del perfil ({profile.english_level})")
 
-    total_weight = sum(weights.values()) or 1.0
-    score = round(max(0.0, min(100.0, earned / total_weight * 100)), 2)
-    if hard_rejects or score < 55:
-        decision = "REJECT"
-    elif score >= 75:
-        decision = "APPLY"
-    else:
-        decision = "REVIEW"
-    return ScoreResult(score, decision, matched, missing, hard_rejects, positive)
+    hard_rejects = normalize_reason_list(hard_rejects)
+    score = round(max(0.0, min(100.0, earned / (sum(weights.values()) or 1.0) * 100)), 2)
+    decision = "REJECT" if hard_rejects or score < 55 else "APPLY" if score >= 75 else "REVIEW"
+    target_terms = list(dict.fromkeys([*profile.target_roles, *profile.skills]))
+    return ScoreResult(score, decision, matched, missing, hard_rejects, positive, requirements, matched,
+                       sorted(configured_skills), target_terms)
+
+
+def normalize_reason_list(values) -> list[str]:
+    if not values: return []
+    return [str(value).strip() for value in values if str(value).strip().casefold() not in EMPTY_REASON_VALUES]
 
 
 def _role_matches(title: str, target_role: str) -> bool:
-    def tokens(value: str) -> set[str]:
-        value = unicodedata.normalize("NFKD", value.lower())
-        value = "".join(character for character in value if not unicodedata.combining(character))
-        normalized = []
-        for token in re.findall(r"[a-z0-9]+", value):
-            if token in {"de", "del", "y", "and"}: continue
-            normalized.append("analyst" if token in {"analyst", "analista"} else token)
-        return set(normalized)
-    required = tokens(target_role)
-    return bool(required) and required <= tokens(title)
+    """Backward-compatible wrapper for older callers/tests."""
+    return roles_match(title, target_role)

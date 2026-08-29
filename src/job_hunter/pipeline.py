@@ -113,8 +113,9 @@ def job_published_timestamp(job: Job) -> float:
 
 
 def _profile_aliases(profile) -> list[str]:
+    from .semantics import expand_target_roles
     aliases = [alias for values in profile.query_groups.values() for alias in values]
-    return aliases or profile.search_queries
+    return list(dict.fromkeys([*(aliases or profile.search_queries), *expand_target_roles(profile.target_roles)]))
 
 
 def _read_csv(path: str | Path) -> list[Job]:

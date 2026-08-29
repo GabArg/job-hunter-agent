@@ -23,6 +23,8 @@ class Job:
     required_english: str | None = None
     seniority: str | None = None
     detected_skills: list[str] = field(default_factory=list)
+    job_requirements: list[str] = field(default_factory=list)
+    role_subtype: str | None = None
     score: float | None = None
     decision: str | None = None
     reasons: dict[str, Any] = field(default_factory=dict)
@@ -56,6 +58,10 @@ class ScoreResult:
     missing_skills: list[str]
     hard_reject_reasons: list[str]
     positive_reasons: list[str]
+    job_requirements: list[str] = field(default_factory=list)
+    matched_requirements: list[str] = field(default_factory=list)
+    candidate_skills: list[str] = field(default_factory=list)
+    target_profile_terms: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -65,4 +71,8 @@ class ScoreResult:
             "missing_skills": self.missing_skills,
             "hard_reject_reasons": self.hard_reject_reasons,
             "positive_reasons": self.positive_reasons,
+            "job_requirements": self.job_requirements,
+            "matched_requirements": self.matched_requirements,
+            "candidate_skills": self.candidate_skills,
+            "target_profile_terms": self.target_profile_terms,
         }

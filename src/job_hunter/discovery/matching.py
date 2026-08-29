@@ -5,6 +5,7 @@ import unicodedata
 from datetime import datetime, timedelta, timezone
 
 from .models import RawJob
+from ..semantics import roles_match
 
 INCOMPATIBLE_REGIONS = (
     r"\bus only\b", r"\bu\.s\. only\b", r"\bunited states only\b",
@@ -22,9 +23,12 @@ def normalized(value: str) -> str:
     return re.sub(r"\s+", " ", "".join(c for c in decomposed if not unicodedata.combining(c)).lower()).strip()
 
 
-def title_matches(title: str, aliases: list[str]) -> bool:
+def title_matches(title: str, aliases: list[str], description: str = "") -> bool:
     candidate = normalized(title)
-    return any(_phrase_in(candidate, normalized(alias)) for alias in aliases if alias.strip())
+    return any(
+        _phrase_in(candidate, normalized(alias)) or roles_match(title, alias, description)
+        for alias in aliases if alias.strip()
+    )
 
 
 def geography_compatible(raw: RawJob, preferred_locations: list[str]) -> tuple[bool, str | None]:
@@ -68,6 +72,11 @@ def parse_datetime(value: str | int | float | None) -> datetime | None:
         return parsed.replace(tzinfo=parsed.tzinfo or timezone.utc).astimezone(timezone.utc)
     except (ValueError, TypeError, OSError):
         return None
+
+
+def normalize_datetime(value: str | int | float | None) -> str | None:
+    parsed = parse_datetime(value)
+    return parsed.isoformat(timespec="seconds") if parsed else None
 
 
 def _phrase_in(title: str, phrase: str) -> bool:

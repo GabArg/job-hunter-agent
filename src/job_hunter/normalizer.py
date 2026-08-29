@@ -4,6 +4,7 @@ import re
 import unicodedata
 
 from .models import Job
+from .semantics import canonicalize_terms, detect_concepts, detect_roles
 
 SENIORITY_PATTERNS = {
     "principal": r"\bprincipal\b",
@@ -40,9 +41,12 @@ def normalize_job(job: Job, known_skills: list[str] | None = None) -> Job:
     job.seniority = _first_match(searchable, SENIORITY_PATTERNS)
     job.required_english = _extract_english(searchable)
     job.required_years = _extract_years(searchable)
-    job.detected_skills = [
-        skill for skill in (known_skills or []) if _contains_term(searchable, clean_text(skill))
-    ]
+    job.job_requirements = detect_concepts(job.description)
+    candidate_concepts = canonicalize_terms(known_skills or [])
+    job.detected_skills = [concept for concept in job.job_requirements if concept in candidate_concepts]
+    roles = detect_roles(job.title, job.description)
+    subtypes = [role for role in roles if role.startswith("business-analyst-")]
+    job.role_subtype = sorted(subtypes)[0] if subtypes else (sorted(roles)[0] if roles else None)
     return job
 
 

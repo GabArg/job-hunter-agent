@@ -76,7 +76,7 @@ class DiscoveryAggregator:
                     source_jobs.extend(source.discover(query, location, remaining))
                 stat.fetched = len(source_jobs)
                 for raw in source_jobs:
-                    if not title_matches(raw.title, query_list):
+                    if not title_matches(raw.title, query_list, raw.description):
                         stat.rejected_pre_score += 1
                         continue
                     stat.relevant_by_title += 1
@@ -102,6 +102,7 @@ class DiscoveryAggregator:
 
 
 def raw_to_job(raw: RawJob) -> Job:
+    from .matching import normalize_datetime
     return Job(
         title=raw.title.strip(),
         company=raw.company.strip() or "Unknown",
@@ -110,7 +111,7 @@ def raw_to_job(raw: RawJob) -> Job:
         description=_plain_text(raw.description),
         source=raw.source.strip(),
         url=canonical_url(raw.url),
-        published_at=raw.published_at,
+        published_at=normalize_datetime(raw.published_at) or raw.published_at,
         discovered_at=raw.discovered_at,
     )
 

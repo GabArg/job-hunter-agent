@@ -14,12 +14,15 @@ from job_hunter.discovery.lock import DiscoveryAlreadyRunning, DiscoveryLock
 from job_hunter.knowledge import KnowledgeUpdater
 from job_hunter.operations import generate_job_cv, next_schedule_time
 from job_hunter.pipeline import run_discovery_pipeline
+from job_hunter.discovery.matching import parse_datetime
+from job_hunter.scorer import normalize_reason_list
+from job_hunter.semantics import display_concepts
 
 
 def _display_time(value) -> str:
     if not value: return "—"
-    try: return datetime.fromisoformat(str(value)).astimezone().strftime("%d/%m/%Y %H:%M")
-    except ValueError: return str(value)
+    parsed = parse_datetime(value)
+    return parsed.astimezone().strftime("%d/%m/%Y %H:%M") if parsed else str(value)
 
 
 def _render_job_detail(database: JobDatabase, row: dict, master_cv_path: str) -> None:
@@ -29,11 +32,16 @@ def _render_job_detail(database: JobDatabase, row: dict, master_cv_path: str) ->
     st.write(f'Publicada: {_display_time(row["published_at"])} · Detectada: {_display_time(row["first_seen_at"])} · Score: {row["score"]:.2f}')
     st.write(f'Estado operativo: **{row["application_status"]}**')
     st.markdown(f'[Abrir oferta original]({row["url"]})')
-    cols = st.columns(3)
-    cols[0].write("**Motivos positivos**"); cols[0].write(reasons.get("positive_reasons") or ["—"])
-    cols[1].write("**Gaps**"); cols[1].write(reasons.get("missing_skills") or ["—"])
-    cols[2].write("**Hard rejects**"); cols[2].write(reasons.get("hard_reject_reasons") or ["—"])
-    st.write("**Skills detectadas:**", ", ".join(reasons.get("matched_skills") or []) or "—")
+    cols = st.columns(4)
+    requirements = reasons.get("job_requirements") or []
+    matched = reasons.get("matched_requirements") or reasons.get("matched_skills") or []
+    missing = reasons.get("missing_skills") or []
+    hard_rejects = normalize_reason_list(reasons.get("hard_reject_reasons"))
+    cols[0].write("**Requisitos detectados**"); cols[0].write(display_concepts(requirements) or ["—"])
+    cols[1].write("**Match del candidato**"); cols[1].write(display_concepts(matched) or ["—"])
+    cols[2].write("**Gaps reales**"); cols[2].write(display_concepts(missing) or ["—"])
+    cols[3].write("**Hard rejects**"); cols[3].write(hard_rejects or ["Ninguno"])
+    st.write("**Motivos positivos:**", reasons.get("positive_reasons") or ["—"])
     with st.expander("Descripción completa"): st.write(row["description"])
     job_id, status = int(row["id"]), str(row["application_status"])
     actions = st.columns(3)
