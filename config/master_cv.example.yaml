@@ -1,0 +1,90 @@
+# CV maestro completamente ficticio. Copiar a private/master_cv.yaml y reemplazar localmente.
+personal:
+  name: Alex Example
+  headline: Analista de Datos y Negocios
+  location: Buenos Aires, Argentina
+  linkedin: https://www.linkedin.com/in/example-profile
+  github: https://github.com/example-profile
+
+summary_facts:
+  - Profesional orientado al análisis de datos, negocio y mejora de procesos.
+  - Experiencia ficticia transformando información operativa en reportes para la toma de decisiones.
+
+experience:
+  - company: Example Retail Labs
+    role: Commercial Analytics Assistant
+    start_date: 2024-01
+    end_date: Present
+    facts:
+      - Analicé ventas y márgenes por categoría para apoyar decisiones comerciales.
+      - Documenté procesos comerciales y coordiné requerimientos con stakeholders internos.
+      - Construí reportes de KPIs operativos y comerciales.
+    technologies:
+      - Excel
+      - SQL
+      - Power BI
+    achievements:
+      - Automaticé la consolidación de reportes semanales con herramientas existentes del equipo.
+  - company: Fictional Operations Co
+    role: Operations Intern
+    start_date: 2023-03
+    end_date: 2023-12
+    facts:
+      - Relevé procesos operativos e identifiqué oportunidades de estandarización.
+      - Preparé análisis de desvíos para reuniones de seguimiento.
+    technologies:
+      - Excel
+      - Python
+    achievements:
+      - Organicé un tablero de seguimiento de indicadores operativos.
+
+projects:
+  - name: Example Sales Dashboard
+    description: Proyecto ficticio de análisis comercial.
+    facts:
+      - Modelé datos de ventas y preparé visualizaciones para comparar categorías.
+      - Escribí consultas SQL para consolidar fuentes del proyecto.
+    technologies:
+      - SQL
+      - Power BI
+      - Excel
+    metrics:
+      - El dataset ficticio del proyecto contiene 10000 registros de práctica.
+    links:
+      - https://github.com/example-profile/example-sales-dashboard
+  - name: Example Pricing Study
+    description: Proyecto ficticio de análisis de precios y mercado.
+    facts:
+      - Comparé precios, volumen y margen en escenarios comerciales simulados.
+      - Documenté supuestos y conclusiones del análisis de pricing.
+    technologies:
+      - Excel
+      - Python
+    metrics: []
+    links: []
+
+education:
+  - institution: Example University
+    program: Licenciatura en Administración
+    status: En curso
+    dates: 2022 - Present
+
+courses:
+  - SQL for Analytics - Example Academy
+  - Power BI Fundamentals - Example Academy
+
+skills:
+  - SQL
+  - Excel
+  - Power BI
+  - Python
+  - Business Analysis
+  - Pricing
+  - KPI Reporting
+  - Process Mapping
+
+languages:
+  - language: Spanish
+    level: Native
+  - language: English
+    level: Intermediate

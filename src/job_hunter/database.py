@@ -87,3 +87,21 @@ class JobDatabase:
                 score DESC, COALESCE(published_at, '') DESC, id DESC"""
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def get_job(self, job_id: int | None = None, url: str | None = None) -> Job | None:
+        if job_id is None and url is None:
+            raise ValueError("job_id or url is required")
+        query, value = ("id = ?", job_id) if job_id is not None else ("url = ?", url)
+        with self._connect() as connection:
+            row = connection.execute(f"SELECT * FROM jobs WHERE {query}", (value,)).fetchone()
+        if row is None:
+            return None
+        data = dict(row)
+        return Job(
+            title=data["title"], company=data["company"], location=data["location"],
+            work_mode=data["work_mode"], description=data["description"], source=data["source"],
+            url=data["url"], published_at=data.get("published_at"),
+            discovered_at=data.get("discovered_at") or data["created_at"], id=data["id"],
+            score=data["score"], decision=data["decision"], reasons=json.loads(data["reasons"]),
+            created_at=data["created_at"],
+        )

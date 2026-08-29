@@ -77,6 +77,28 @@ scoring descarta publicaciones antiguas y ubicaciones incompatibles, incluyendo
 `US only`, `EU only`, `UK only` y `Canada only`. Un `Remote` sin evidencia explícita
 de Argentina o LATAM no se considera compatible por defecto.
 
+## CV Agent
+
+Crear las copias privadas, que están ignoradas por Git:
+
+```powershell
+New-Item -ItemType Directory -Force private
+Copy-Item config/candidate_profile.example.yaml private/candidate_profile.yaml
+Copy-Item config/master_cv.example.yaml private/master_cv.yaml
+```
+
+Generar un CV para una oferta `APPLY` o `REVIEW` almacenada en SQLite:
+
+```powershell
+python -m job_hunter.cli cv --job-id 123 --master-cv private/master_cv.yaml --output outputs/
+python -m job_hunter.cli cv --url https://jobs.example/job --master-cv private/master_cv.yaml
+```
+
+El motor determinístico selecciona hechos del CV maestro y conserva
+`source_fact_ids` auditables para cada bullet. El validator bloquea bullets sin
+evidencia, empresas o tecnologías ausentes del maestro. La salida inicial es HTML
+ATS-friendly; no se generan PDFs ni se realizan postulaciones en esta fase.
+
 El dashboard permite elegir el CSV, el perfil y la base de datos desde la barra lateral, ejecutar el pipeline y filtrar los resultados.
 
 ## Tests

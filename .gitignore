@@ -5,6 +5,8 @@ __pycache__/
 venv/
 .env
 config/profile.yaml
+private/
+outputs/
 data/*.db
 data/*.sqlite*
 .streamlit/secrets.toml

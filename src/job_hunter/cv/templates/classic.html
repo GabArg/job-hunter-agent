@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{NAME}} — CV</title>
+  <style>
+    @page { size: A4; margin: 15mm; }
+    * { box-sizing: border-box; }
+    body { max-width: 850px; margin: 0 auto; color: #172033; background: white;
+      font: 10.5pt/1.35 Arial, Helvetica, sans-serif; }
+    header { border-bottom: 2px solid #243b64; padding-bottom: 10px; margin-bottom: 14px; }
+    h1 { font-size: 23pt; margin: 0; letter-spacing: .2px; }
+    .headline { font-size: 12pt; margin: 3px 0; color: #304e7a; }
+    .contact { font-size: 9pt; overflow-wrap: anywhere; }
+    h2 { color: #243b64; font-size: 12pt; text-transform: uppercase; letter-spacing: .7px;
+      border-bottom: 1px solid #b8c2d1; margin: 14px 0 7px; padding-bottom: 2px; }
+    p { margin: 4px 0; }
+    .entry { break-inside: avoid; margin: 0 0 9px; }
+    .entry-head { display: flex; justify-content: space-between; gap: 12px; }
+    .organization, .tech { color: #46566e; font-size: 9.5pt; }
+    ul { margin: 4px 0 4px 18px; padding: 0; }
+    li { margin-bottom: 2px; }
+    @media print { body { max-width: none; } a { color: inherit; text-decoration: none; } }
+  </style>
+</head>
+<body>
+  <header><h1>{{NAME}}</h1><div class="headline">{{HEADLINE}}</div><div class="contact">{{CONTACT}}</div></header>
+  <h2>Perfil profesional</h2><p>{{SUMMARY}}</p>
+  <h2>Habilidades</h2><p>{{SKILLS}}</p>
+  <h2>Experiencia</h2>{{EXPERIENCE}}
+  {{PROJECTS}}
+  <h2>Educación</h2>{{EDUCATION}}
+  <h2>Idiomas</h2><p>{{LANGUAGES}}</p>
+</body>
+</html>

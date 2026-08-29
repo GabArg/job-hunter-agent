@@ -10,6 +10,8 @@ from job_hunter.database import JobDatabase
 from job_hunter.config import load_profile
 from job_hunter.discovery.factory import build_sources
 from job_hunter.pipeline import run_discovery_pipeline, run_pipeline
+from job_hunter.cv import HTMLCVRenderer, adapt_cv, load_master_cv
+from job_hunter.cv.models import CVApprovalState
 
 st.set_page_config(page_title="Job Hunter Agent", layout="wide")
 st.title("Job Hunter Agent")
@@ -20,6 +22,7 @@ with st.sidebar:
     csv_path = st.text_input("CSV", "data/sample_jobs.csv")
     profile_path = st.text_input("Perfil", "config/profile.yaml")
     database_path = st.text_input("SQLite", "data/jobs.db")
+    master_cv_path = st.text_input("Master CV privado", "private/master_cv.yaml")
     if st.button("Importar y evaluar", type="primary"):
         try:
             result = run_pipeline(csv_path, profile_path, database_path)
@@ -102,6 +105,58 @@ counts = {decision: sum(row["decision"] == decision for row in rows) for decisio
 columns = st.columns(3)
 for column, decision in zip(columns, counts):
     column.metric(decision, counts[decision])
+
+st.subheader("CV Agent")
+eligible_rows = [row for row in rows if row["decision"] in {"APPLY", "REVIEW"}]
+if eligible_rows:
+    labels = {
+        f'{row["decision"]} · {row["company"]} · {row["title"]} · #{row["id"]}': row
+        for row in eligible_rows
+    }
+    selected_cv_label = st.selectbox("Oferta APPLY/REVIEW", list(labels))
+    if st.button("Generar CV", type="primary"):
+        try:
+            selected_job = JobDatabase(database_path).get_job(job_id=int(labels[selected_cv_label]["id"]))
+            adapted_cv = adapt_cv(selected_job, load_master_cv(master_cv_path))
+            rendered_cv = HTMLCVRenderer().render(adapted_cv)
+            st.session_state["adapted_cv"] = adapted_cv
+            st.session_state["adapted_cv_html"] = rendered_cv
+        except Exception as exc:
+            st.error(f"No se pudo generar el CV: {exc}")
+else:
+    st.info("No hay ofertas APPLY o REVIEW disponibles para generar un CV.")
+
+adapted_cv = st.session_state.get("adapted_cv")
+if adapted_cv:
+    st.success(f"Validación factual: {adapted_cv.validation_status}")
+    approval = st.selectbox(
+        "Estado del CV", [state.value for state in CVApprovalState if state != CVApprovalState.NOT_GENERATED],
+        index=[state.value for state in CVApprovalState if state != CVApprovalState.NOT_GENERATED].index(
+            adapted_cv.approval_state.value
+        ),
+    )
+    adapted_cv.approval_state = CVApprovalState(approval)
+    st.markdown("**Resumen adaptado**")
+    st.write(adapted_cv.professional_summary)
+    st.markdown("**Skills priorizadas**")
+    st.write(" · ".join(adapted_cv.skills))
+    st.markdown("**Experiencia seleccionada**")
+    for section in adapted_cv.experience_sections:
+        st.markdown(f"{section.role} — {section.company}")
+        for bullet in section.bullets:
+            st.write(f"- {bullet.text}")
+            st.caption(f"Evidencia: {', '.join(bullet.source_fact_ids)}")
+    if adapted_cv.project_sections:
+        st.markdown("**Proyectos seleccionados**")
+        for section in adapted_cv.project_sections:
+            st.markdown(section.name)
+            for bullet in section.bullets:
+                st.write(f"- {bullet.text}")
+                st.caption(f"Evidencia: {', '.join(bullet.source_fact_ids)}")
+    st.download_button(
+        "Descargar HTML", st.session_state["adapted_cv_html"],
+        file_name=f"cv-{adapted_cv.job_id}.html", mime="text/html",
+    )
 
 selected = st.multiselect("Filtrar por decisión", list(counts), default=list(counts))
 search = st.text_input("Buscar por empresa o puesto").strip().lower()

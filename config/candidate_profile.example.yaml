@@ -1,0 +1,6 @@
+# Configuración ficticia y pública. La copia privada puede definir preferencias de presentación.
+preferred_language: es
+max_pages: 2
+max_experience_bullets: 3
+max_project_bullets: 2
+include_courses: true

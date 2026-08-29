@@ -3,10 +3,13 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 from .config import load_profile
 from .discovery.factory import build_sources
 from .pipeline import run_discovery_pipeline, run_pipeline
+from .cv import HTMLCVRenderer, adapt_cv, load_master_cv
+from .database import JobDatabase
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -29,6 +32,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     discover.add_argument("--profile", default="config/profile.yaml", help="YAML profile path")
     discover.add_argument("--database", default="data/jobs.db", help="SQLite database path")
+    cv = subparsers.add_parser("cv", help="Generate a factually validated tailored CV")
+    target = cv.add_mutually_exclusive_group(required=True)
+    target.add_argument("--job-id", type=int, help="Stored job ID")
+    target.add_argument("--url", help="Stored job URL")
+    cv.add_argument("--master-cv", default="private/master_cv.yaml", help="Private factual master CV")
+    cv.add_argument("--output", default="outputs", help="Output directory")
+    cv.add_argument("--database", default="data/jobs.db", help="SQLite database path")
+    cv.add_argument("--allow-reject", action="store_true", help="Explicitly allow CV for a REJECT job")
     return parser
 
 
@@ -40,7 +51,7 @@ def main() -> None:
     if args.command == "run":
         result = run_pipeline(args.input, args.profile, args.database)
         print(f"Processed {len(result.jobs)} jobs ({result.inserted} inserted, {result.updated} updated)")
-    else:
+    elif args.command == "discover":
         profile = load_profile(args.profile)
         queries = list(args.query or [])
         for group in args.query_group or []:
@@ -61,6 +72,15 @@ def main() -> None:
                 f"pre_score_rejected={stat.rejected_pre_score} scored={stat.scored} "
                 f"duplicates={stat.duplicates} status={status}"
             )
+    else:
+        job = JobDatabase(args.database).get_job(args.job_id, args.url)
+        if job is None:
+            raise SystemExit("Job not found in SQLite")
+        adapted = adapt_cv(job, load_master_cv(args.master_cv), allow_reject=args.allow_reject)
+        safe_name = "".join(character if character.isalnum() else "-" for character in job.title).strip("-").lower()
+        output = HTMLCVRenderer().render_to_file(adapted, Path(args.output) / f"cv-{job.id}-{safe_name}.html")
+        print(f"CV {adapted.validation_status} | {adapted.approval_state} | {output}")
+        return
     for job in result.jobs[:20]:
         print(f"{job.decision:6} | {job.score:6.2f} | {job.company} | {job.title} | {job.url}")
 
