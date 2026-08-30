@@ -152,6 +152,8 @@ def select_skills(job: Job, master: MasterCV, selection: Selection, limit: int =
     for index, skill in enumerate(inventory):
         skill_tag = _skill_tag(skill)
         explicit = 12 if _skill_explicit(skill, skill_tag, text, selection.explicit_tags) else 0
+        if skill_tag == "generative-ai" and not explicit:
+            continue
         adjacent_aliases = {
             "business-analytics": "business-analysis", "operations-analytics": "operations",
             "kpi-design": "kpi", "process-improvement": "processes",
@@ -177,7 +179,7 @@ def select_skills(job: Job, master: MasterCV, selection: Selection, limit: int =
     ) if item[0] > 0]
     selected, seen_concepts = [], set()
     for _, _, _, _, _, skill in positive:
-        concept = _skill_concept(skill)
+        concept = _display_skill_concept(skill)
         if concept in seen_concepts:
             continue
         selected.append(skill)
@@ -307,6 +309,12 @@ def _skill_concept(skill: str) -> str:
     tag = _skill_tag(skill)
     if tag in {"apis", "api"}: return "apis"
     if tag in {"ai", "generative-ai"}: return "generative-ai"
+    return tag
+
+
+def _display_skill_concept(skill: str) -> str:
+    tag = _skill_concept(skill)
+    if tag in {"analytics", "business-analytics", "data-analysis"}: return "analytics"
     return tag
 
 

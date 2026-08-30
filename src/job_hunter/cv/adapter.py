@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import replace
 
 from ..models import Job
-from .models import AdaptedCV, ExperienceSection, FactualBullet, FactualText, MasterCV, ProjectSection
+from .models import AdaptedCV, CourseEntry, ExperienceSection, FactualBullet, FactualText, MasterCV, ProjectSection
 from .rewriter import rewrite_fact
 from .selector import Selection, rank_skills, relevance_score, select_facts, select_skills
 from .summary import RuleBasedSummaryComposer, SummaryComposer
@@ -78,9 +79,26 @@ def adapt_cv(
         job.id or job.url, job.title, job.company, float(job.score or 0), dict(master.personal),
         summary, summary_ids,
         [section for _, _, section in sorted(experiences, key=lambda item: (-item[0], item[1]))],
-        projects, list(master.education), [master.courses[index] for index in selection.course_indices],
+        projects, list(master.education), [_informative_course_label(master.courses[index], selection)
+                                          for index in selection.course_indices],
         select_skills(job, master, selection, 12 if content_mode == "concise" else 18),
         list(master.languages), selection.keywords, selection.omitted_ids, content_mode,
     )
     validate_cv(cv, master)
     return cv
+
+
+def _informative_course_label(course: CourseEntry, selection: Selection) -> CourseEntry:
+    """Replace vague program labels using only topic names present in factual course text."""
+    if course.program.casefold() not in {"formación continua en datos", "datos y tecnología"}:
+        return course
+    factual_text = " ".join(fact.text for fact in course.facts).casefold()
+    topics = (
+        "SQL", "Python", "Power BI", "Data Analytics", "Business Intelligence", "Reporting",
+        "Pandas", "PostgreSQL", "DAX", "Machine Learning", "APIs REST", "JSON", "JSONL",
+    )
+    relevant = [topic for topic in topics if topic.casefold() in factual_text]
+    keyword_text = " ".join(selection.keywords).replace("-", " ").casefold()
+    requested = [topic for topic in relevant if topic.casefold() in keyword_text]
+    chosen = (requested + [topic for topic in relevant if topic not in requested])[:3]
+    return replace(course, program=" / ".join(chosen)) if chosen else course

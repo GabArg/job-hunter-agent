@@ -3,7 +3,9 @@ from __future__ import annotations
 from email import policy
 from email.parser import BytesParser
 import base64
+import hashlib
 from pathlib import Path
+import unicodedata
 
 from pypdf import PdfReader
 
@@ -53,12 +55,30 @@ def test_explicit_core_skills_win_over_secondary_tools():
     assert max(skills.index(value) for value in ("SQL", "Python", "Power BI")) < min(
         (skills.index(value) for value in ("AWS", "Git", "Generative AI") if value in skills), default=len(skills)
     )
+    assert "Generative AI" not in skills
+
+
+def test_analytics_skills_are_conceptually_deduplicated():
+    skills = _cv().skills
+    assert "Data Analysis" in skills
+    assert len({"Analytics", "Business Analytics", "Data Analysis"} & set(skills)) == 1
 
 
 def test_business_data_courses_are_data_relevant_and_limited():
-    courses = [course.program for course in _cv().courses]
-    assert courses == ["Formación continua en datos", "Datos y tecnología"]
+    cv = _cv(); courses = [course.program for course in cv.courses]
+    assert courses == ["SQL / Python / Power BI", "Python / Data Analytics / Business Intelligence"]
     assert len(courses) <= 2 and "AWS re/Start" not in courses and "Cybersecurity" not in courses
+    assert not {"Formación continua en datos", "Datos y tecnología"} & set(courses)
+    for course in cv.courses:
+        evidence = unicodedata.normalize("NFKD", " ".join(fact.text for fact in course.facts)).casefold()
+        assert all(unicodedata.normalize("NFKD", topic).casefold() in evidence
+                   for topic in course.program.split(" / "))
+
+
+def test_master_cv_hash_is_unchanged():
+    assert hashlib.sha256(Path(MASTER).read_bytes()).hexdigest() == (
+        "8e3e43b481b2889661daa23d82d2217f14e26554f0132ad3aeeba44d5e0741a7"
+    )
 
 
 def test_summary_is_compact_factual_and_english_is_unchanged():
