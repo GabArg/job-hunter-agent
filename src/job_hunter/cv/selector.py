@@ -17,7 +17,6 @@ ROLE_TAGS = {
     "data-engineering": ["sql", "postgresql", "apis", "json", "jsonl", "etl", "data-ingestion", "python", "linux", "aws", "oci"],
     "cloud": ["aws", "oci", "linux", "networking", "cloud"],
     "ai-automation": ["generative-ai", "n8n", "ai-agents", "chatbots", "python", "automation"],
-    "security": ["security-fundamentals", "linux", "sql", "python", "networking"],
 }
 TERM_TAGS = {
     "power bi": "power-bi", "kpis": "kpi", "kpi": "kpi", "procesos": "processes",
@@ -37,7 +36,7 @@ TERM_TAGS = {
     "automation": "automation", "automatizacion": "automation", "automatización": "automation",
     "workflow automation": "automation", "apis": "apis", "api": "apis",
     "inteligencia artificial": "generative-ai", "ia": "generative-ai",
-    "generative ai": "generative-ai", "ia generativa": "generative-ai", "n8n": "n8n",
+    "generative ai": "generative-ai", "ia generativa": "generative-ai", "ai": "generative-ai", "n8n": "n8n",
     "ai agents": "ai-agents", "agentes ia": "ai-agents", "agentes de ia": "ai-agents",
     "chatbot": "chatbots", "chatbots": "chatbots",
 }
@@ -62,18 +61,20 @@ class Selection:
 def extract_job_requirements(job: Job) -> tuple[list[str], list[str]]:
     text = _normalize(f"{job.title} {job.description}")
     families = []
-    if any(term in text for term in ("data scientist", "ciencia de datos", "machine learning scientist")): families.append("data-science")
-    if any(term in text for term in ("data engineer", "analytics engineer", "ingenieria de datos", "ingeniero de datos")): families.append("data-engineering")
-    if any(term in text for term in ("bi analyst", "business intelligence", "analista bi")): families.append("bi")
-    if any(term in text for term in ("cloud", "nube", "aws", "oci")): families.append("cloud")
-    if any(term in text for term in ("ai automation", "automatizacion con ia", "agentes de ia", "n8n", "chatbot")): families.append("ai-automation")
-    if any(term in text for term in ("cybersecurity", "ciberseguridad", "network security", "seguridad informatica")): families.append("security")
-    if any(term in text for term in ("business", "negocio", "comercial")): families.append("business")
-    if any(term in text for term in ("data", "datos", "analytics", "sql", "power bi")): families.append("data")
-    if any(term in text for term in ("pricing", "precio", "margen")): families.append("pricing")
-    if any(term in text for term in ("operations", "operaciones")): families.append("operations")
+    if _matches_any(("data scientist", "ciencia de datos", "machine learning scientist"), text): families.append("data-science")
+    if _matches_any(("data engineer", "analytics engineer", "ingenieria de datos", "ingeniero de datos"), text): families.append("data-engineering")
+    if _matches_any(("bi analyst", "business intelligence", "analista bi"), text): families.append("bi")
+    if _matches_any(("cloud", "nube", "aws", "oci"), text): families.append("cloud")
+    if _matches_any(("ai automation", "automatizacion con ia", "agentes de ia", "n8n", "chatbot"), text): families.append("ai-automation")
+    if _matches_any(("business", "negocio", "comercial"), text): families.append("business")
+    specialized = {"data-engineering", "data-science", "bi", "ai-automation"} & set(families)
+    explicit_data_role = _matches_any(("data analyst", "analista de datos", "data analytics"), text)
+    if explicit_data_role or (not specialized and _matches_any(("data", "datos", "analytics", "sql", "python", "power bi"), text)):
+        families.append("data")
+    if _matches_any(("pricing", "precio", "margen"), text): families.append("pricing")
+    if _matches_any(("operations", "operaciones"), text): families.append("operations")
     if not families: families.append("data")
-    explicit = _unique(tag for term, tag in TERM_TAGS.items() if _normalize(term) in text)
+    explicit = _unique(tag for term, tag in TERM_TAGS.items() if _term_matches(term, text))
     return _unique([*explicit, *(tag for family in families for tag in ROLE_TAGS[family])]), explicit
 
 
@@ -109,16 +110,14 @@ def select_facts(job: Job, master: MasterCV, content_mode: str = "concise") -> S
         projects[index] = chosen
         selected_ids.update(fact.id for fact in chosen)
     course_scores = []
-    security_relevant = "security-fundamentals" in {_normalize_tag(tag) for tag in explicit}
     for index, course in enumerate(master.courses):
-        if _is_security_course(course) and not security_relevant:
+        # Historical security training remains factual, but never drives automatic CV positioning.
+        if _is_security_course(course):
             continue
         score = sum(relevance_score(fact, keywords) for fact in course.facts)
         score += relevance_score(f"{course.institution} {course.program}", keywords)
         if _course_specific_match(course, job):
             score += 30
-        if _is_security_course(course) and security_relevant:
-            score += 12
         if score:
             course_scores.append((score, index))
     course_limit = 2 if content_mode == "concise" else 3
@@ -296,12 +295,14 @@ def _role_skill_priorities(job: Job) -> list[str]:
         ("bi", ("bi analyst", "business intelligence", "analista bi", "power bi", "dax")),
         ("ai-automation", ("ai automation", "workflow automation", "automatizacion con ia", "n8n", "chatbot", "ai agents", "agentes de ia")),
         ("cloud", ("cloud", "nube", "aws", "oci")),
-        ("security", ("cybersecurity", "ciberseguridad", "network security", "seguridad informatica")),
     )
     for family, terms in patterns:
-        if any(term in text for term in terms):
+        if _matches_any(terms, text):
             families.append(family)
-    if not families or any(term in text for term in ("data analyst", "analista de datos", "analytics")):
+    if not families or (
+        not ({"data-engineering", "data-science"} & set(families))
+        and _matches_any(("data analyst", "analista de datos", "analytics"), text)
+    ):
         families.append("data")
     return _unique(tag for family in families for tag in ROLE_TAGS[family])
 
@@ -319,6 +320,16 @@ def _course_specific_match(course, job: Job) -> bool:
     course_pairs = {tuple(course_terms[index:index + 2]) for index in range(len(course_terms) - 1)}
     generic = {"data", "datos", "python", "sql", "analytics", "analitica", "analisis", "con", "and", "para", "the", "y"}
     return any(any(len(term) >= 4 and term not in generic for term in pair) for pair in job_pairs & course_pairs)
+
+
+def _matches_any(terms, text: str) -> bool:
+    return any(_term_matches(term, text) for term in terms)
+
+
+def _term_matches(term: str, text: str) -> bool:
+    normalized_term = _normalize(term)
+    normalized_text = _normalize(text)
+    return re.search(rf"(?<!\w){re.escape(normalized_term)}(?!\w)", normalized_text) is not None
 
 
 def _tag_text(tag: str) -> str:

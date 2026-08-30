@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from job_hunter.cv.adapter import adapt_cv
 from job_hunter.cv.loader import load_master_cv
+from job_hunter.cv.selector import ROLE_TAGS, _term_matches, extract_job_requirements
 from job_hunter.models import Job
 
 
@@ -64,11 +65,11 @@ def test_ai_automation_selects_focused_training_and_skills():
     assert [course.program for course in cv.courses] == ["Transformación Digital con IA y Automatización"]
 
 
-def test_cybersecurity_course_is_gated_by_actual_job_requirements():
+def test_cybersecurity_course_is_never_selected_automatically():
     data_cv = _adapt("Data Analyst", "SQL, Python, Power BI, Excel y reporting.")
     security_cv = _adapt("Cybersecurity Analyst", "Linux, SQL, Python, networking y security fundamentals.")
     assert "Cybersecurity" not in {course.program for course in data_cv.courses}
-    assert "Cybersecurity" in {course.program for course in security_cv.courses}
+    assert "Cybersecurity" not in {course.program for course in security_cv.courses}
 
 
 def test_concise_cv_limits_courses_and_avoids_api_skill_duplicates():
@@ -76,3 +77,57 @@ def test_concise_cv_limits_courses_and_avoids_api_skill_duplicates():
     assert len(cv.courses) <= 2
     assert not ({"APIs", "APIs REST"} <= set(cv.skills))
 
+
+def test_short_aliases_use_word_boundaries():
+    assert not _term_matches("ia", "IAM y cloud security")
+    assert _term_matches("ia", "soluciones de IA generativa")
+    assert _term_matches("bi", "BI Analyst")
+    assert not _term_matches("bi", "bilingual analyst")
+    assert _term_matches("ai", "AI Agents")
+    assert not _term_matches("ai", "email automation")
+
+
+def test_iam_does_not_detect_generative_ai_but_real_ia_does():
+    iam_job = Job("Cloud Data Engineer", "Example", "Argentina", "remote", "AWS, IAM y Linux", "test", "https://example.com/iam")
+    ai_job = Job("Automation Analyst", "Example", "Argentina", "remote", "Soluciones de IA generativa", "test", "https://example.com/ia")
+    assert "generative-ai" not in extract_job_requirements(iam_job)[1]
+    assert "generative-ai" in extract_job_requirements(ai_job)[1]
+
+
+def test_data_engineering_only_includes_power_bi_when_explicit():
+    without_bi = _adapt("Data Engineer", "SQL PostgreSQL APIs REST JSON JSONL ETL ingesta Python Linux AWS")
+    with_bi = _adapt("Data Engineer", "SQL PostgreSQL ETL Python y Power BI")
+    assert "Power BI" not in without_bi.skills
+    assert "Power BI" in with_bi.skills
+
+
+def test_data_science_only_includes_power_bi_when_explicit():
+    without_bi = _adapt("Data Scientist", "Python Pandas NumPy Scikit-learn Machine Learning SQL estadística")
+    with_bi = _adapt("Data Scientist", "Python Pandas Machine Learning SQL y Power BI")
+    assert "Power BI" not in without_bi.skills
+    assert "Reporting" not in without_bi.skills
+    assert "Power BI" in with_bi.skills
+
+
+def test_ai_automation_remains_focused_and_valid():
+    cv = _adapt("AI Automation Analyst", "Generative AI n8n AI Agents Chatbots Python APIs Automation")
+    assert cv.skills[:6] == ["Generative AI", "n8n", "AI Agents", "Chatbots", "Python", "Automation"]
+    assert cv.validation_status == "VALID"
+
+
+def test_security_is_not_an_active_role_family():
+    assert "security" not in ROLE_TAGS
+
+
+def test_google_security_training_is_excluded_from_target_families():
+    cases = (
+        ("Data Analyst", "SQL Python Power BI"),
+        ("BI Analyst", "Power BI DAX SQL Excel"),
+        ("Data Scientist", "Python Pandas Scikit-learn Machine Learning"),
+        ("AI Automation Analyst", "Generative AI n8n AI Agents Chatbots"),
+        ("Cloud Data Engineer", "AWS Linux networking security fundamentals SQL Python"),
+    )
+    for title, description in cases:
+        cv = _adapt(title, description)
+        assert "Cybersecurity" not in {course.program for course in cv.courses}
+        assert cv.validation_status == "VALID"
