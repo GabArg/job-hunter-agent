@@ -7,6 +7,7 @@ from urllib.parse import quote
 from ..base import JobSource, fetch_json
 from ..matching import title_matches
 from ..models import RawJob
+from ...normalizer import normalize_work_mode
 
 
 class SmartRecruitersSource(JobSource):
@@ -36,7 +37,7 @@ class SmartRecruitersSource(JobSource):
             sections = ((detail.get("jobAd") or {}).get("sections") or {})
             description = " ".join(str(section.get("text") or "") for section in sections.values() if isinstance(section, dict))
             results.append(RawJob(
-                job_id, title, self.company, location_text, str(item.get("typeOfEmployment") or ""),
+                job_id, title, self.company, location_text, normalize_work_mode(None, description, detail),
                 description, self.name, str(detail.get("postingUrl") or detail.get("applyUrl") or item.get("ref") or f"https://jobs.smartrecruiters.com/{self.account}/{job_id}"),
                 str(item.get("releasedDate") or "") or None, raw_data=item,
             ))

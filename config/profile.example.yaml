@@ -183,6 +183,7 @@ preferred_companies:
   - Banco Galicia
   - Santander
 priority_fresh_days: 3
+max_age_days: 14
 target_roles:
   - pricing analyst
   - business analyst

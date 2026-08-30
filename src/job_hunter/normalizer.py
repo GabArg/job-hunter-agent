@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from typing import Any
 
 from .models import Job
 from .semantics import canonicalize_terms, detect_concepts, detect_roles
@@ -33,7 +34,7 @@ def normalize_job(job: Job, known_skills: list[str] | None = None) -> Job:
     job.title = clean_text(job.title)
     job.company = (job.company or "").strip()
     job.location = clean_text(job.location)
-    job.work_mode = _normalize_work_mode(job.work_mode)
+    job.work_mode = normalize_work_mode(job.work_mode, job.description, job.raw_data)
     job.description = re.sub(r"\s+", " ", (job.description or "").strip())
     job.source = clean_text(job.source)
     job.url = (job.url or "").strip()
@@ -50,19 +51,39 @@ def normalize_job(job: Job, known_skills: list[str] | None = None) -> Job:
     return job
 
 
-def _normalize_work_mode(value: str) -> str:
-    value = clean_text(value)
-    aliases = {
-        "remoto": "remote",
-        "remote": "remote",
-        "hibrido": "hybrid",
-        "híbrido": "hybrid",
-        "hybrid": "hybrid",
-        "presencial": "onsite",
-        "on-site": "onsite",
-        "onsite": "onsite",
+VALID_WORK_MODES = {"remote", "hybrid", "onsite", "unknown"}
+
+
+def normalize_work_mode(value: Any, description: str = "", raw_data: Any = None) -> str:
+    """Return modality only; employment types such as full-time are ignored."""
+    evidence = " ".join(part for part in (_work_mode_text(value), description, _work_mode_text(raw_data)) if part)
+    text = clean_text(evidence)
+    signals = {
+        "hybrid": ("hybrid", "hibrido", "híbrido", "hibrida", "híbrida", "modalidad mixta"),
+        "remote": ("remote", "remoto", "remota", "home office", "work from home"),
+        "onsite": ("onsite", "on-site", "on site", "presencial", "in-office", "in office"),
     }
-    return aliases.get(value, value)
+    for mode, aliases in signals.items():
+        if any(re.search(rf"(?<!\w){re.escape(clean_text(alias))}(?!\w)", text) for alias in aliases):
+            return mode
+    return "unknown"
+
+
+def _work_mode_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return " ".join(_work_mode_text(child) for child in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return " ".join(_work_mode_text(child) for child in value)
+    return ""
+
+
+def _normalize_work_mode(value: Any) -> str:
+    """Backward-compatible wrapper."""
+    return normalize_work_mode(value)
 
 
 def _first_match(text: str, patterns: dict[str, str]) -> str | None:

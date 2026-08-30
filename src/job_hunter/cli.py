@@ -44,6 +44,17 @@ def build_parser() -> argparse.ArgumentParser:
     probes = subparsers.add_parser("probe-targets", help="Probe configured candidate targets only")
     probes.add_argument("--profile", default="config/profile.yaml")
     probes.add_argument("--output", default="data/reports")
+    cleanup = subparsers.add_parser("cleanup-old-jobs", help="Safely report or remove expired unprotected jobs")
+    cleanup.add_argument("--profile", default="config/profile.yaml")
+    cleanup.add_argument("--database", default="data/jobs.db")
+    cleanup_mode = cleanup.add_mutually_exclusive_group(required=True)
+    cleanup_mode.add_argument("--dry-run", action="store_true")
+    cleanup_mode.add_argument("--apply", action="store_true")
+    fix_modes = subparsers.add_parser("fix-work-modes", help="Normalize invalid persisted work modes")
+    fix_modes.add_argument("--database", default="data/jobs.db")
+    fix_mode = fix_modes.add_mutually_exclusive_group(required=True)
+    fix_mode.add_argument("--dry-run", action="store_true")
+    fix_mode.add_argument("--apply", action="store_true")
     cv = subparsers.add_parser("cv", help="Generate a factually validated tailored CV")
     target = cv.add_mutually_exclusive_group(required=True)
     target.add_argument("--job-id", type=int, help="Stored job ID")
@@ -147,6 +158,23 @@ def main() -> None:
         print(f"Probed {len(results)} candidates | report={output}")
         for result in results:
             print(f"{result.company} | {result.detected_source_type} | {result.status} | jobs={result.jobs_found}")
+        return
+    elif args.command == "cleanup-old-jobs":
+        profile = load_profile(args.profile)
+        result = JobDatabase(args.database).cleanup_old_jobs(profile.max_age_days, apply=args.apply)
+        print(f"Threshold: {result['threshold']} | max_age_days={profile.max_age_days}")
+        for row in result["eligible"]:
+            print(f"ELIGIBLE | {row['id']} | {row['company']} | {row['title']} | {row['published_at']} | {row['decision']} | {row['application_status']}")
+        for row in result["protected"]:
+            print(f"PROTECTED_OLD_JOB | {row['id']} | {row['company']} | {row['title']} | {row['published_at']} | {row['decision']} | {row['application_status']}")
+        print(f"Eligible={len(result['eligible'])} Protected={len(result['protected'])} Deleted={result['deleted']}")
+        if result["backup"]: print(f"Backup: {result['backup']}")
+        return
+    elif args.command == "fix-work-modes":
+        changes = JobDatabase(args.database).repair_invalid_work_modes(apply=args.apply)
+        for row in changes:
+            print(f"{row['job_id']} | {row['company']} | {row['title']} | {row['before']} -> {row['after']}")
+        print(f"Changed={len(changes) if args.apply else 0} Candidates={len(changes)}")
         return
     elif args.command == "cv":
         job = JobDatabase(args.database).get_job(args.job_id, args.url)

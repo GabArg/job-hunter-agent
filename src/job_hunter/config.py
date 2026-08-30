@@ -56,6 +56,7 @@ def load_profile(path: str | Path) -> Profile:
         career_pages=[dict(value) for value in data.get("career_pages") or []],
         preferred_companies=_normalized_list(data.get("preferred_companies") or []),
         priority_fresh_days=int(data.get("priority_fresh_days", 3)),
+        max_age_days=int(data.get("max_age_days", 14)),
     )
 
 

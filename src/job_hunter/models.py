@@ -69,6 +69,7 @@ class Profile:
     career_pages: list[dict[str, Any]] = field(default_factory=list)
     preferred_companies: list[str] = field(default_factory=list)
     priority_fresh_days: int = 3
+    max_age_days: int = 14
 
 
 @dataclass(frozen=True, slots=True)

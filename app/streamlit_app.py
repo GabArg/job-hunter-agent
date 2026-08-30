@@ -18,6 +18,7 @@ from job_hunter.pipeline import run_discovery_pipeline
 from job_hunter.discovery.matching import parse_datetime
 from job_hunter.scorer import normalize_reason_list
 from job_hunter.semantics import display_concepts
+from job_hunter.normalizer import normalize_work_mode
 
 
 def _display_time(value) -> str:
@@ -26,10 +27,14 @@ def _display_time(value) -> str:
     return parsed.astimezone().strftime("%d/%m/%Y %H:%M") if parsed else str(value)
 
 
+def _display_work_mode(value, description: str = "") -> str:
+    return normalize_work_mode(value, description).title()
+
+
 def _render_job_detail(database: JobDatabase, row: dict, master_cv_path: str) -> None:
     reasons = json.loads(str(row["reasons"]))
     st.subheader(f'{row["decision"]} · {row["title"]}')
-    st.write(f'**{row["company"]}** · {row["location"]} · {row["work_mode"]} · {row["source"]}')
+    st.write(f'**{row["company"]}** · {row["location"]} · {_display_work_mode(row["work_mode"], row["description"])} · {row["source"]}')
     st.write(f'Publicada: {_display_time(row["published_at"])} · Detectada: {_display_time(row["first_seen_at"])} · Score: {row["score"]:.2f}')
     st.write(f'Estado operativo: **{row["application_status"]}**')
     st.markdown(f'[Abrir oferta original]({row["url"]})')
@@ -201,7 +206,7 @@ with job_hunt_tab:
         st.dataframe([{"ID": row["id"], "Decisión": row["decision"], "Score": row["score"],
                        "Estado": row["application_status"], "Empresa": row["company"], "Puesto": row["title"],
                        "Sector": row.get("sector") or "Other", "Nueva <72h": "🆕" if row.get("priority_fresh") else "",
-                       "Modalidad": row["work_mode"], "Método": row.get("application_channel_used") or row.get("application_method"),
+                       "Modalidad": _display_work_mode(row["work_mode"], row["description"]), "Método": row.get("application_channel_used") or row.get("application_method"),
                        "Destinatario": row.get("application_email") or "", "Aplicada": _display_time(row.get("applied_at")),
                        "Detectada": _display_time(row["first_seen_at"]), "Oferta": row["url"]}
                       for row in rows], hide_index=True, use_container_width=True,

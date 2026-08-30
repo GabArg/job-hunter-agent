@@ -308,3 +308,60 @@ class JobDatabase:
                 "decisions": {row["decision"]: row["count"] for row in decisions},
                 "targets_without_results": [row["target"] for row in intelligence if row["fetched"] == 0],
                 "frequent_errors": [row["source"] for row in intelligence if row["errors"] > 0]}
+
+    def create_backup(self, directory: str | Path | None = None) -> Path:
+        destination_dir = Path(directory or self.path.parent / "backups")
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        destination = destination_dir / f"{self.path.stem}_{timestamp}{self.path.suffix}"
+        source = sqlite3.connect(self.path)
+        target = sqlite3.connect(destination)
+        try:
+            source.backup(target)
+        finally:
+            target.close(); source.close()
+        return destination
+
+    def cleanup_old_jobs(self, max_age_days: int, *, apply: bool = False,
+                         now: datetime | None = None) -> dict[str, Any]:
+        from .discovery.matching import parse_datetime
+        reference = now or datetime.now(timezone.utc)
+        threshold = reference - timedelta(days=max_age_days)
+        eligible: list[dict[str, Any]] = []
+        protected: list[dict[str, Any]] = []
+        with self._connect() as connection:
+            rows = connection.execute("""SELECT id,company,title,published_at,decision,application_status
+                FROM jobs WHERE published_at IS NOT NULL ORDER BY id""").fetchall()
+            for row in rows:
+                published = parse_datetime(row["published_at"])
+                if published is None or published >= threshold:
+                    continue
+                data = dict(row)
+                if row["application_status"] in {"NEW", "SKIPPED"}:
+                    eligible.append(data)
+                else:
+                    data["reason"] = "PROTECTED_OLD_JOB"
+                    protected.append(data)
+            backup = None
+            if apply and eligible:
+                backup = self.create_backup()
+                connection.executemany("DELETE FROM jobs WHERE id=?", [(row["id"],) for row in eligible])
+        return {"threshold": threshold.isoformat(timespec="seconds"), "eligible": eligible,
+                "protected": protected, "deleted": len(eligible) if apply else 0,
+                "backup": str(backup) if backup else None}
+
+    def repair_invalid_work_modes(self, *, apply: bool = False) -> list[dict[str, Any]]:
+        from .normalizer import VALID_WORK_MODES, normalize_work_mode
+        changes: list[dict[str, Any]] = []
+        with self._connect() as connection:
+            rows = connection.execute("SELECT id,company,title,work_mode,description FROM jobs ORDER BY id").fetchall()
+            for row in rows:
+                before = str(row["work_mode"] or "")
+                if before.casefold() in VALID_WORK_MODES:
+                    continue
+                after = normalize_work_mode(before, str(row["description"] or ""))
+                changes.append({"job_id": row["id"], "company": row["company"], "title": row["title"],
+                                "before": before, "after": after})
+                if apply:
+                    connection.execute("UPDATE jobs SET work_mode=? WHERE id=?", (after, row["id"]))
+        return changes
