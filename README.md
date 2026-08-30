@@ -171,6 +171,34 @@ private/gmail/token.json
 Todo `private/` está ignorado por Git. La aplicación nunca activa Gmail ni envía
 emails automáticamente durante discovery, tests o generación de CV.
 
+### Conectar Gmail mediante OAuth 2.0
+
+Job Hunter Agent solicita únicamente el scope oficial
+`https://www.googleapis.com/auth/gmail.compose`. En Fase 5.1 puede crear borradores,
+pero el envío real permanece bloqueado.
+
+1. Entrar a Google Cloud Console y crear o seleccionar un proyecto.
+2. Habilitar **Gmail API** para ese proyecto.
+3. Configurar **OAuth consent screen** con los datos requeridos por Google.
+4. Crear un **OAuth Client ID** de tipo **Desktop App**.
+5. Descargar el JSON de credenciales.
+6. Guardarlo localmente como `private/gmail/client_secret.json`.
+7. Usar **Conectar Gmail** en `System / Runs`, o ejecutar:
+
+```powershell
+python -m job_hunter.cli gmail-connect
+python -m job_hunter.cli gmail-status
+```
+
+8. Autorizar explícitamente la cuenta en el navegador abierto por Google.
+9. El token se guardará sólo en `private/gmail/token.json` y se reutilizará o
+   refrescará mediante las librerías oficiales.
+
+La contraseña nunca pasa por Job Hunter Agent. Los tokens, client secret y datos
+OAuth quedan dentro de `private/`, ignorado por Git, y nunca se almacenan en SQLite.
+Revocar el acceso desde la cuenta de Google invalida la conexión local. El dashboard
+no inicia OAuth por sí solo y crear un borrador no marca la vacante como postulada.
+
 ## Formato de entrada
 
 El CSV acepta las columnas `title`, `company`, `location`, `work_mode`, `description`, `source` y `url`. La URL es obligatoria y se usa como clave única de deduplicación.

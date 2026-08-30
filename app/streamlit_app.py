@@ -13,7 +13,7 @@ from job_hunter.discovery.factory import build_sources
 from job_hunter.discovery.lock import DiscoveryAlreadyRunning, DiscoveryLock
 from job_hunter.knowledge import KnowledgeUpdater
 from job_hunter.operations import generate_job_cv, next_schedule_time, prepare_application_email
-from job_hunter.application import EmailDraft, GmailEmailProvider, send_approved_email
+from job_hunter.application import EmailDraft, GmailEmailProvider, create_approved_gmail_draft
 from job_hunter.pipeline import run_discovery_pipeline
 from job_hunter.discovery.matching import parse_datetime
 from job_hunter.scorer import normalize_reason_list
@@ -115,7 +115,7 @@ def _render_application_channel(database: JobDatabase, row: dict, master_cv_path
     if row.get("application_email") and pdf_valid and st.button("Preparar email", key=f"prepare-email-{job_id}"):
         try: prepare_application_email(database.path, job_id, master_cv_path); st.rerun()
         except Exception as exc: st.error(str(exc))
-    if row.get("email_draft_status") in {"GENERATED", "APPROVED"}:
+    if row.get("email_draft_status") in {"GENERATED", "APPROVED", "GMAIL_DRAFT_CREATED"}:
         with st.form(f"email-edit-{job_id}"):
             recipient = st.text_input("Destinatario", row.get("application_email") or "")
             subject = st.text_input("Asunto", row.get("email_subject") or "")
@@ -124,23 +124,21 @@ def _render_application_channel(database: JobDatabase, row: dict, master_cv_path
                 database.save_email_draft(job_id, recipient, subject, body); st.rerun()
     if row.get("email_draft_status") == "GENERATED" and st.button("Aprobar email", key=f"approve-email-{job_id}"):
         database.approve_email_draft(job_id); st.rerun()
-    if row.get("email_draft_status") == "GENERATED" and st.button("Crear borrador en Gmail", key=f"gmail-draft-{job_id}"):
-        attachment = Path("outputs/cvs") / str(job_id) / "cv.pdf"
-        if not attachment.exists(): attachment = cv_path
-        draft = EmailDraft(row["application_email"], row["email_subject"], row["email_body"], [str(attachment)], attachment.suffix == ".html")
-        try:
-            provider = GmailEmailProvider(); provider.authorize(); message_id = provider.create_draft(draft)
-            database.save_email_draft(job_id, draft.recipient, draft.subject, draft.body, message_id); st.rerun()
-        except Exception as exc: st.error(f"Gmail OAuth no configurado; no se creó ningún borrador: {exc}")
-    if row.get("email_draft_status") == "APPROVED":
-        st.warning(f'Vas a enviar un email real a {row.get("application_email")} con el CV adjunto.')
-        confirmed = st.checkbox("Confirmo el envío", key=f"confirm-send-{job_id}")
-        if st.button("Enviar email", disabled=not confirmed, key=f"send-email-{job_id}"):
-            attachment = Path("outputs/cvs") / str(job_id) / "cv.pdf"
-            if not attachment.exists(): attachment = cv_path
-            draft = EmailDraft(row["application_email"], row["email_subject"], row["email_body"], [str(attachment)], attachment.suffix == ".html")
-            try: send_approved_email(database, job_id, GmailEmailProvider(), draft); st.rerun()
-            except Exception as exc: st.error(f"No se envió y el estado no cambió: {exc}")
+    if row.get("email_draft_status") == "APPROVED" and pdf_valid:
+        st.write(f'**Destinatario:** {row.get("application_email")}')
+        st.write(f'**Asunto:** {row.get("email_subject")}')
+        st.write(f'**Adjunto:** {pdf_path}')
+        confirmed = st.checkbox("Confirmo crear este borrador en mi Gmail", key=f"confirm-gmail-{job_id}")
+        if st.button("Crear borrador en Gmail", disabled=not confirmed, key=f"gmail-draft-{job_id}"):
+            draft = EmailDraft(row["application_email"], row["email_subject"], row["email_body"], [str(pdf_path)])
+            try: create_approved_gmail_draft(database, job_id, GmailEmailProvider(), draft); st.rerun()
+            except Exception as exc: st.error(f"No se creó el borrador y el estado no cambió: {exc}")
+    elif row.get("email_draft_status") == "APPROVED":
+        st.warning("El email está aprobado, pero se requiere un PDF_VALID antes de crear el borrador Gmail.")
+    elif row.get("email_draft_status") == "GMAIL_DRAFT_CREATED":
+        st.success(f'Borrador Gmail existente: {row.get("gmail_draft_id")}')
+    elif row.get("email_draft_status") == "GMAIL_DRAFT_STALE":
+        st.warning("El contenido cambió después de crear el borrador. Creá uno nuevo.")
 
 st.set_page_config(page_title="Job Hunter Agent", layout="wide")
 st.title("Job Hunter Agent")
@@ -314,6 +312,24 @@ with knowledge_tab:
 
 with system_tab:
     st.subheader("System / Runs")
+    st.subheader("Gmail")
+    gmail = GmailEmailProvider()
+    account = database.latest_gmail_account()
+    if not gmail.configured:
+        st.info("⚪ Gmail todavía no está conectado. Falta private/gmail/client_secret.json")
+    elif not gmail.authorized:
+        st.warning("🟡 Credenciales disponibles, autorización pendiente")
+    else:
+        st.success(f"🟢 Gmail conectado{': ' + account if account else ''}")
+    if st.button("Conectar Gmail", disabled=not gmail.configured):
+        try:
+            account = gmail.authorize()
+            database.record_gmail_event("GMAIL_AUTHORIZED", "SUCCESS", account_email=account)
+            st.success(f"Gmail conectado: {account}"); st.rerun()
+        except Exception as exc:
+            database.record_gmail_event("GMAIL_AUTHORIZED", "FAILED", error=str(exc))
+            st.error(f"No se pudo autorizar Gmail: {exc}")
+    st.caption("Scope: gmail.compose. La aplicación sólo crea borradores; el envío real está deshabilitado.")
     runs = database.list_discovery_runs()
     st.write(f"Ofertas en SQLite: {len(database.list_jobs())}")
     st.write(f"Fuentes activas: {', '.join(source_names) or 'Ninguna'}")

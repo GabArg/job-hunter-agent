@@ -76,6 +76,12 @@ def build_parser() -> argparse.ArgumentParser:
     generate_cv.add_argument("--output", default="outputs/cvs")
     generate_cv.add_argument("--database", default="data/jobs.db")
     generate_cv.add_argument("--allow-reject", action="store_true")
+    gmail_status = subparsers.add_parser("gmail-status", help="Show local Gmail OAuth status without secrets")
+    gmail_status.add_argument("--credentials-dir", default="private/gmail")
+    gmail_status.add_argument("--database", default="data/jobs.db")
+    gmail_connect = subparsers.add_parser("gmail-connect", help="Explicitly start Gmail OAuth Desktop flow")
+    gmail_connect.add_argument("--credentials-dir", default="private/gmail")
+    gmail_connect.add_argument("--database", default="data/jobs.db")
     knowledge = subparsers.add_parser("knowledge", help="Manage approval-gated factual updates")
     knowledge.add_argument("--master-cv", default="private/master_cv.yaml")
     knowledge.add_argument("--proposals", default="private/update_proposals.yaml")
@@ -215,6 +221,24 @@ def main() -> None:
         print(f"HTML: {adapted.validation_status} | {html}")
         print(f"PDF: {row['cv_pdf_status']} | Pages: {row['cv_pdf_pages']}")
         print(f"Output: {row['cv_pdf_path']}")
+        return
+    elif args.command in {"gmail-status", "gmail-connect"}:
+        from .application import GmailEmailProvider
+        provider = GmailEmailProvider(args.credentials_dir); database = JobDatabase(args.database)
+        if args.command == "gmail-connect":
+            try:
+                account = provider.authorize()
+                database.record_gmail_event("GMAIL_AUTHORIZED", "SUCCESS", account_email=account)
+                print(f"Gmail connected: {account}")
+            except Exception as exc:
+                database.record_gmail_event("GMAIL_AUTHORIZED", "FAILED", error=str(exc))
+                raise SystemExit(f"Gmail connection failed: {exc}") from exc
+            return
+        status = provider.status(); account = database.latest_gmail_account()
+        print(f"Configured: {'yes' if status['configured'] else 'no'}")
+        print(f"Authorized: {'yes' if status['authorized'] else 'no'}")
+        print(f"Account: {account or 'unknown'}")
+        print(f"Token path: {status['token_path']}")
         return
     else:
         updater = KnowledgeUpdater(args.master_cv, args.proposals, args.audit, args.backups)

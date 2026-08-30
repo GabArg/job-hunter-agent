@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     application_url TEXT, application_instructions TEXT NOT NULL DEFAULT '[]',
     email_subject TEXT, email_body TEXT,
     email_draft_status TEXT NOT NULL DEFAULT 'NOT_GENERATED', email_sent_at TEXT,
-    email_message_id TEXT, selected_application_channel TEXT, application_channel_used TEXT
+    email_message_id TEXT, selected_application_channel TEXT, application_channel_used TEXT,
+    gmail_draft_id TEXT, gmail_message_id TEXT, gmail_draft_created_at TEXT, gmail_account_email TEXT
 )
 """
 
@@ -50,6 +51,13 @@ CREATE TABLE IF NOT EXISTS source_metrics (
  review_count INTEGER DEFAULT 0, reject_count INTEGER DEFAULT 0, duplicates INTEGER DEFAULT 0,
  errors INTEGER DEFAULT 0, error_message TEXT, latency_ms INTEGER DEFAULT 0, fresh_count INTEGER DEFAULT 0,
  quality_score REAL DEFAULT 0, consecutive_failures INTEGER DEFAULT 0, health TEXT DEFAULT 'HEALTHY'
+)
+"""
+GMAIL_AUDIT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS gmail_audit (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, job_id INTEGER,
+ action TEXT NOT NULL, recipient TEXT, draft_id TEXT, account_email TEXT,
+ status TEXT NOT NULL, error TEXT
 )
 """
 IMPORT_HISTORY_SCHEMA = """
@@ -81,7 +89,7 @@ class JobDatabase:
 
     def _initialize(self) -> None:
         with self._connect() as connection:
-            connection.execute(JOBS_SCHEMA); connection.execute(RUNS_SCHEMA); connection.execute(SOURCE_METRICS_SCHEMA); connection.execute(IMPORT_HISTORY_SCHEMA)
+            connection.execute(JOBS_SCHEMA); connection.execute(RUNS_SCHEMA); connection.execute(SOURCE_METRICS_SCHEMA); connection.execute(IMPORT_HISTORY_SCHEMA); connection.execute(GMAIL_AUDIT_SCHEMA)
             columns = {row[1] for row in connection.execute("PRAGMA table_info(jobs)")}
             migrations = {
                 "published_at": "TEXT", "discovered_at": "TEXT", "application_status": "TEXT NOT NULL DEFAULT 'NEW'",
@@ -89,6 +97,8 @@ class JobDatabase:
                 "cv_generated_at": "TEXT", "applied_at": "TEXT",
                 "cv_pdf_path": "TEXT", "cv_pdf_status": "TEXT NOT NULL DEFAULT 'PDF_NOT_GENERATED'",
                 "cv_pdf_generated_at": "TEXT", "cv_pdf_pages": "INTEGER",
+                "gmail_draft_id": "TEXT", "gmail_message_id": "TEXT",
+                "gmail_draft_created_at": "TEXT", "gmail_account_email": "TEXT",
                 "application_method": "TEXT NOT NULL DEFAULT 'UNKNOWN'", "application_email": "TEXT",
                 "application_url": "TEXT", "application_instructions": "TEXT NOT NULL DEFAULT '[]'",
                 "email_subject": "TEXT", "email_body": "TEXT",
@@ -215,7 +225,9 @@ class JobDatabase:
         if row["email_draft_status"] == "SENT": raise ValueError("A SENT email cannot be edited")
         with self._connect() as connection:
             connection.execute("""UPDATE jobs SET application_email=?,email_subject=?,email_body=?,
-                email_draft_status='GENERATED',email_message_id=? WHERE id=?""", (recipient, subject, body, message_id, job_id))
+                email_draft_status=CASE WHEN email_draft_status='GMAIL_DRAFT_CREATED'
+                    THEN 'GMAIL_DRAFT_STALE' ELSE 'GENERATED' END,email_message_id=? WHERE id=?""",
+                (recipient, subject, body, message_id, job_id))
 
     def approve_email_draft(self, job_id: int) -> None:
         row = self.get_job_row(job_id)
@@ -232,9 +244,44 @@ class JobDatabase:
         if status not in allowed: raise ValueError(f"Invalid PDF status: {status}")
         with self._connect() as connection:
             cursor = connection.execute("""UPDATE jobs SET cv_pdf_path=?,cv_pdf_status=?,
-                cv_pdf_generated_at=?,cv_pdf_pages=? WHERE id=?""",
+                cv_pdf_generated_at=?,cv_pdf_pages=?,email_draft_status=CASE
+                    WHEN email_draft_status='GMAIL_DRAFT_CREATED' THEN 'GMAIL_DRAFT_STALE'
+                    ELSE email_draft_status END WHERE id=?""",
                 (str(path), status, at or utc_now(), int(pages), job_id))
             if cursor.rowcount != 1: raise KeyError(f"Job not found: {job_id}")
+
+    def save_gmail_draft(self, job_id: int, draft_id: str, message_id: str | None,
+                         account_email: str, at: str | None = None) -> None:
+        timestamp = at or utc_now()
+        with self._connect() as connection:
+            cursor = connection.execute("""UPDATE jobs SET gmail_draft_id=?,gmail_message_id=?,
+                gmail_draft_created_at=?,gmail_account_email=?,email_draft_status='GMAIL_DRAFT_CREATED'
+                WHERE id=? AND email_draft_status='APPROVED' AND gmail_draft_id IS NULL""",
+                (draft_id, message_id, timestamp, account_email, job_id))
+            if cursor.rowcount != 1:
+                raise ValueError("Email must be APPROVED and have no existing Gmail draft")
+
+    def record_gmail_event(self, action: str, status: str, *, job_id: int | None = None,
+                           recipient: str | None = None, draft_id: str | None = None,
+                           account_email: str | None = None, error: str | None = None) -> None:
+        from .application.email_sender import sanitize_gmail_error
+        safe_error = sanitize_gmail_error(error) if error else None
+        with self._connect() as connection:
+            connection.execute("""INSERT INTO gmail_audit
+                (timestamp,job_id,action,recipient,draft_id,account_email,status,error)
+                VALUES (?,?,?,?,?,?,?,?)""", (utc_now(), job_id, action, recipient, draft_id,
+                                                account_email, status, safe_error))
+
+    def list_gmail_events(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT * FROM gmail_audit ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def latest_gmail_account(self) -> str | None:
+        with self._connect() as connection:
+            row = connection.execute("""SELECT account_email FROM gmail_audit
+                WHERE account_email IS NOT NULL AND status='SUCCESS' ORDER BY id DESC LIMIT 1""").fetchone()
+        return str(row["account_email"]) if row else None
 
     def mark_email_sent(self, job_id: int, message_id: str, channel: str = "EMAIL", at: str | None = None) -> None:
         timestamp = at or utc_now()
