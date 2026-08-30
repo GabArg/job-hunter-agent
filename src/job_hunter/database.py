@@ -50,6 +50,13 @@ CREATE TABLE IF NOT EXISTS source_metrics (
  quality_score REAL DEFAULT 0, consecutive_failures INTEGER DEFAULT 0, health TEXT DEFAULT 'HEALTHY'
 )
 """
+IMPORT_HISTORY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS import_history (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, imported_at TEXT NOT NULL, source_url TEXT,
+ company TEXT, title TEXT, source_type TEXT NOT NULL, result TEXT NOT NULL,
+ job_id INTEGER, duplicate_job_id INTEGER, warnings TEXT NOT NULL DEFAULT '[]', import_method TEXT NOT NULL
+)
+"""
 
 
 def utc_now() -> str:
@@ -72,7 +79,7 @@ class JobDatabase:
 
     def _initialize(self) -> None:
         with self._connect() as connection:
-            connection.execute(JOBS_SCHEMA); connection.execute(RUNS_SCHEMA); connection.execute(SOURCE_METRICS_SCHEMA)
+            connection.execute(JOBS_SCHEMA); connection.execute(RUNS_SCHEMA); connection.execute(SOURCE_METRICS_SCHEMA); connection.execute(IMPORT_HISTORY_SCHEMA)
             columns = {row[1] for row in connection.execute("PRAGMA table_info(jobs)")}
             migrations = {
                 "published_at": "TEXT", "discovered_at": "TEXT", "application_status": "TEXT NOT NULL DEFAULT 'NEW'",
@@ -85,6 +92,8 @@ class JobDatabase:
                 "email_message_id": "TEXT", "selected_application_channel": "TEXT", "application_channel_used": "TEXT",
                 "sector": "TEXT NOT NULL DEFAULT 'Other'", "sector_confidence": "REAL NOT NULL DEFAULT 0",
                 "priority_fresh": "INTEGER NOT NULL DEFAULT 0",
+                "imported_manually": "INTEGER NOT NULL DEFAULT 0", "imported_at": "TEXT",
+                "import_source_url": "TEXT", "import_method": "TEXT",
             }
             for name, definition in migrations.items():
                 if name not in columns: connection.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
@@ -116,15 +125,16 @@ class JobDatabase:
                   job.published_at, seen_at, job.score, job.decision, json.dumps(job.reasons, ensure_ascii=False),
                   job.created_at, seen_at, seen_at, seen_at, job.application_method, job.application_email,
                   job.application_url, json.dumps(job.application_instructions, ensure_ascii=False), job.email_subject,
-                  job.sector, job.sector_confidence, int(job.priority_fresh))
+                  job.sector, job.sector_confidence, int(job.priority_fresh), int(job.imported_manually),
+                  job.imported_at, job.import_source_url, job.import_method)
         with self._connect() as connection:
             existed = connection.execute("SELECT 1 FROM jobs WHERE url = ?", (job.url,)).fetchone()
             connection.execute("""
                 INSERT INTO jobs (title, company, location, work_mode, description, source, url, published_at,
                     discovered_at, score, decision, reasons, created_at, first_seen_at, last_seen_at, last_scored_at,
                     application_method, application_email, application_url, application_instructions, email_subject,
-                    sector, sector_confidence, priority_fresh)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    sector, sector_confidence, priority_fresh, imported_manually, imported_at, import_source_url, import_method)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(url) DO UPDATE SET
                     title=excluded.title, company=excluded.company, location=excluded.location,
                     work_mode=excluded.work_mode, description=excluded.description, source=excluded.source,
@@ -135,7 +145,11 @@ class JobDatabase:
                     application_instructions=excluded.application_instructions,
                     email_subject=CASE WHEN jobs.email_draft_status='NOT_GENERATED' THEN excluded.email_subject ELSE jobs.email_subject END,
                     sector=excluded.sector,sector_confidence=excluded.sector_confidence,
-                    priority_fresh=excluded.priority_fresh
+                    priority_fresh=excluded.priority_fresh,
+                    imported_manually=CASE WHEN jobs.imported_manually=1 THEN 1 ELSE excluded.imported_manually END,
+                    imported_at=COALESCE(jobs.imported_at,excluded.imported_at),
+                    import_source_url=COALESCE(jobs.import_source_url,excluded.import_source_url),
+                    import_method=COALESCE(jobs.import_method,excluded.import_method)
             """, values)
         return existed is None
 
@@ -178,7 +192,9 @@ class JobDatabase:
                    email_draft_status=data.get("email_draft_status") or "NOT_GENERATED", email_sent_at=data.get("email_sent_at"),
                    email_message_id=data.get("email_message_id"), selected_application_channel=data.get("selected_application_channel"),
                    application_channel_used=data.get("application_channel_used"), sector=data.get("sector") or "Other",
-                   sector_confidence=float(data.get("sector_confidence") or 0), priority_fresh=bool(data.get("priority_fresh")))
+                   sector_confidence=float(data.get("sector_confidence") or 0), priority_fresh=bool(data.get("priority_fresh")),
+                   imported_manually=bool(data.get("imported_manually")), imported_at=data.get("imported_at"),
+                   import_source_url=data.get("import_source_url"), import_method=data.get("import_method"))
 
     def select_application_channel(self, job_id: int, channel: str) -> None:
         if channel not in {"LINK", "EMAIL"}: raise ValueError("Channel must be LINK or EMAIL")
@@ -365,3 +381,38 @@ class JobDatabase:
                 if apply:
                     connection.execute("UPDATE jobs SET work_mode=? WHERE id=?", (after, row["id"]))
         return changes
+
+    def find_duplicate_job(self, job: Job, original_url: str | None = None) -> dict[str, Any] | None:
+        from .discovery.aggregator import canonical_url, job_fingerprint
+        canonical = canonical_url(job.url)
+        original = canonical_url(original_url or "")
+        with self._connect() as connection:
+            rows = connection.execute("SELECT * FROM jobs ORDER BY id").fetchall()
+        for row in rows:
+            row_url = canonical_url(str(row["url"] or ""))
+            if row_url and row_url in {canonical, original}:
+                return dict(row)
+        candidate_key = tuple(str(value or "").strip().casefold() for value in (job.company, job.title, job.location))
+        candidate_fingerprint = job_fingerprint(job)
+        for row in rows:
+            row_key = tuple(str(row[key] or "").strip().casefold() for key in ("company", "title", "location"))
+            existing = Job(str(row["title"]), str(row["company"]), str(row["location"]), str(row["work_mode"]),
+                           str(row["description"]), str(row["source"]), str(row["url"]))
+            if row_key == candidate_key or job_fingerprint(existing) == candidate_fingerprint:
+                return dict(row)
+        return None
+
+    def record_import(self, *, source_url: str | None, company: str | None, title: str | None,
+                      source_type: str, result: str, job_id: int | None = None,
+                      duplicate_job_id: int | None = None, warnings: list[str] | None = None,
+                      import_method: str = "PUBLIC_URL") -> None:
+        with self._connect() as connection:
+            connection.execute("""INSERT INTO import_history (imported_at,source_url,company,title,source_type,
+                result,job_id,duplicate_job_id,warnings,import_method) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (utc_now(), source_url, company, title, source_type, result, job_id, duplicate_job_id,
+                 json.dumps(warnings or [], ensure_ascii=False), import_method))
+
+    def list_import_history(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT * FROM import_history ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(row) for row in rows]

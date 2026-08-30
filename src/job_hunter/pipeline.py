@@ -107,20 +107,22 @@ def process_jobs(
     database = JobDatabase(database_path)
     inserted = 0
     for job in jobs:
-        if not job.url:
-            raise ValueError("Every job must have a URL for deduplication")
-        normalize_job(job, profile.skills)
-        result = score_job(job, profile)
-        job.score = result.score
-        job.decision = result.decision
-        job.reasons = result.as_dict()
-        from .application.detector import detect_application_channel
-        detection = detect_application_channel(job.description, job.url, job.raw_data)
-        job.application_method, job.application_email = detection.method.value, detection.email
-        job.application_url, job.application_instructions = detection.application_url, detection.instructions
-        job.email_subject = detection.required_subject
-        inserted += int(database.upsert(job))
+        inserted += int(process_job(job, profile, database))
     return PipelineResult(jobs=jobs, inserted=inserted, updated=len(jobs) - inserted)
+
+
+def process_job(job: Job, profile, database: JobDatabase) -> bool:
+    if not job.url:
+        raise ValueError("Every job must have a URL for deduplication")
+    normalize_job(job, profile.skills)
+    result = score_job(job, profile)
+    job.score, job.decision, job.reasons = result.score, result.decision, result.as_dict()
+    from .application.detector import detect_application_channel
+    detection = detect_application_channel(job.description, job.url, job.raw_data)
+    job.application_method, job.application_email = detection.method.value, detection.email
+    job.application_url, job.application_instructions = detection.application_url, detection.instructions
+    job.email_subject = detection.required_subject
+    return database.upsert(job)
 
 
 def rank_jobs(jobs: list[Job]) -> list[Job]:

@@ -19,6 +19,7 @@ from job_hunter.discovery.matching import parse_datetime
 from job_hunter.scorer import normalize_reason_list
 from job_hunter.semantics import display_concepts
 from job_hunter.normalizer import normalize_work_mode
+from job_hunter.importer import ImportStatus, import_job_from_url, import_manual_job
 
 
 def _display_time(value) -> str:
@@ -160,6 +161,60 @@ top[2].metric("Nuevas desde último discovery", database.new_since_latest_discov
 job_hunt_tab, knowledge_tab, system_tab = st.tabs(["Job Hunt", "Knowledge Base", "System / Runs"])
 
 with job_hunt_tab:
+    with st.expander("Importar vacante", expanded=False):
+        import_mode = st.radio("Origen", ["URL pública", "Texto pegado"], horizontal=True)
+        if import_mode == "URL pública":
+            import_url = st.text_input("Pegar URL", key="import_url")
+            if st.button("Analizar URL", disabled=not import_url.strip()):
+                with st.spinner("Detectando fuente · extrayendo · normalizando · deduplicando · evaluando..."):
+                    st.session_state["import_result"] = import_job_from_url(import_url, profile, database)
+        result = st.session_state.get("import_result")
+        needs_manual = import_mode == "Texto pegado" or (result and result.status == ImportStatus.NEEDS_MANUAL_INPUT)
+        if result and import_mode == "URL pública":
+            icons = {ImportStatus.IMPORTED: "✅", ImportStatus.DUPLICATE: "♻️",
+                     ImportStatus.NEEDS_MANUAL_INPUT: "⚠️", ImportStatus.UNSUPPORTED: "❌", ImportStatus.FAILED: "❌"}
+            st.write(f"{icons[result.status]} **{result.status.value}** · {result.source_type} · {result.extraction_method}")
+            if result.warnings: st.warning(" ".join(result.warnings))
+            if result.status in {ImportStatus.IMPORTED, ImportStatus.DUPLICATE}:
+                st.json({"job_id": result.job_id, "decision": result.decision, "score": result.score,
+                         "company": result.company, "title": result.title, "sector": result.sector,
+                         "work_mode": result.work_mode, "application_method": result.application_method,
+                         "positive_reasons": result.reasons.get("positive_reasons", []),
+                         "gaps": result.reasons.get("missing_skills", []),
+                         "hard_rejects": result.reasons.get("hard_reject_reasons", [])})
+                imported_actions = st.columns(3)
+                if imported_actions[0].button("Ver detalle", key="import-view"):
+                    st.session_state["import_focus_job_id"] = result.job_id
+                can_generate = result.decision in {"APPLY", "REVIEW"} and result.job_id is not None
+                if imported_actions[1].button("Generar CV", key="import-cv", disabled=not can_generate):
+                    try:
+                        output, adapted = generate_job_cv(database.path, int(result.job_id), master_cv_path)
+                        st.success(f"CV {adapted.validation_status}: {output}")
+                    except Exception as exc:
+                        st.error(str(exc))
+                if imported_actions[2].button("Descartar", key="import-skip", disabled=result.job_id is None):
+                    database.set_application_status(int(result.job_id), "SKIPPED")
+                    st.rerun()
+        if needs_manual:
+            if result and result.source_type == "linkedin":
+                st.info("LinkedIn no expuso suficiente información pública. Pegá el texto de la vacante y la analizamos igual.")
+            with st.form("manual_job_import"):
+                manual_url = st.text_input("URL opcional", value=(result.canonical_url if result else ""))
+                columns = st.columns(2)
+                manual_company = columns[0].text_input("Empresa")
+                manual_title = columns[1].text_input("Puesto")
+                manual_location = columns[0].text_input("Ubicación")
+                manual_mode = columns[1].selectbox("Modalidad", ["unknown", "remote", "hybrid", "onsite"])
+                manual_date = st.text_input("Fecha de publicación opcional")
+                manual_description = st.text_area("Texto completo de la vacante", height=220)
+                save_manual = st.form_submit_button("Guardar y analizar", disabled=not manual_description.strip())
+            if save_manual:
+                method = "PASTED_TEXT" if import_mode == "Texto pegado" else "MANUAL_FORM"
+                st.session_state["import_result"] = import_manual_job({"url": manual_url, "company": manual_company,
+                    "title": manual_title, "location": manual_location, "work_mode": manual_mode,
+                    "published_at": manual_date, "description": manual_description}, profile, database, method=method)
+                st.rerun()
+
     action_row = st.columns([1, 3])
     if action_row[0].button("Buscar ofertas ahora", type="primary", use_container_width=True):
         started = time.monotonic()
@@ -212,7 +267,10 @@ with job_hunt_tab:
                       for row in rows], hide_index=True, use_container_width=True,
                      column_config={"Oferta": st.column_config.LinkColumn("Oferta")})
         choices = {f'#{row["id"]} · {row["decision"]} · {row["company"]} · {row["title"]}': row for row in rows}
-        selected = choices[st.selectbox("Detalle de vacante", list(choices))]
+        choice_labels = list(choices)
+        focus_id = st.session_state.get("import_focus_job_id")
+        focus_index = next((index for index, row in enumerate(rows) if row["id"] == focus_id), 0)
+        selected = choices[st.selectbox("Detalle de vacante", choice_labels, index=focus_index)]
         _render_job_detail(database, selected, master_cv_path)
 
 with knowledge_tab:
@@ -259,6 +317,15 @@ with system_tab:
                        "APPLY": run["apply_count"], "REVIEW": run["review_count"], "REJECT": run["reject_count"],
                        "Errores": run["errors"]} for run in runs], hide_index=True, use_container_width=True)
     else: st.info("Aún no hay ejecuciones registradas.")
+    st.subheader("Importaciones manuales")
+    imports = database.list_import_history()
+    if imports:
+        st.dataframe([{"Fecha": _display_time(row["imported_at"]), "Empresa": row["company"],
+                       "Puesto": row["title"], "Fuente": row["source_type"], "Resultado": row["result"],
+                       "Job ID": row["job_id"], "Duplicate": row["duplicate_job_id"],
+                       "Warnings": row["warnings"]} for row in imports], hide_index=True, use_container_width=True)
+    else:
+        st.info("Todavía no hay importaciones manuales.")
     st.subheader("Source Intelligence")
     metric_sectors = ["All", "Fintech", "Banking", "Retail", "E-commerce", "Consulting", "Technology", "SaaS", "Logistics", "Telecom", "Other"]
     metric_sector = st.selectbox("Filtrar métricas por sector", metric_sectors)

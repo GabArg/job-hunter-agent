@@ -40,6 +40,10 @@ class Job:
     sector: str = "Other"
     sector_confidence: float = 0.0
     priority_fresh: bool = False
+    imported_manually: bool = False
+    imported_at: str | None = None
+    import_source_url: str | None = None
+    import_method: str | None = None
     score: float | None = None
     decision: str | None = None
     reasons: dict[str, Any] = field(default_factory=dict)
