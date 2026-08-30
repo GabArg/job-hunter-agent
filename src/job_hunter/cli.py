@@ -12,6 +12,7 @@ from .cv import HTMLCVRenderer, adapt_cv, load_master_cv
 from .database import JobDatabase
 from .discovery.lock import DiscoveryAlreadyRunning, DiscoveryLock
 from .knowledge import KnowledgeUpdater, ProposalGenerator
+from .operations import generate_job_cv
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -69,6 +70,12 @@ def build_parser() -> argparse.ArgumentParser:
     cv.add_argument("--output", default="outputs", help="Output directory")
     cv.add_argument("--database", default="data/jobs.db", help="SQLite database path")
     cv.add_argument("--allow-reject", action="store_true", help="Explicitly allow CV for a REJECT job")
+    generate_cv = subparsers.add_parser("generate-cv", help="Generate and validate HTML + PDF for one job")
+    generate_cv.add_argument("job_id", type=int)
+    generate_cv.add_argument("--master-cv", default="private/master_cv.yaml")
+    generate_cv.add_argument("--output", default="outputs/cvs")
+    generate_cv.add_argument("--database", default="data/jobs.db")
+    generate_cv.add_argument("--allow-reject", action="store_true")
     knowledge = subparsers.add_parser("knowledge", help="Manage approval-gated factual updates")
     knowledge.add_argument("--master-cv", default="private/master_cv.yaml")
     knowledge.add_argument("--proposals", default="private/update_proposals.yaml")
@@ -200,6 +207,14 @@ def main() -> None:
         safe_name = "".join(character if character.isalnum() else "-" for character in job.title).strip("-").lower()
         output = HTMLCVRenderer().render_to_file(adapted, Path(args.output) / f"cv-{job.id}-{safe_name}.html")
         print(f"CV {adapted.validation_status} | {adapted.approval_state} | {output}")
+        return
+    elif args.command == "generate-cv":
+        html, adapted = generate_job_cv(args.database, args.job_id, args.master_cv, args.output, args.allow_reject)
+        row = JobDatabase(args.database).get_job_row(args.job_id)
+        print(f"Job #{args.job_id} | {adapted.job_title} | {adapted.company}")
+        print(f"HTML: {adapted.validation_status} | {html}")
+        print(f"PDF: {row['cv_pdf_status']} | Pages: {row['cv_pdf_pages']}")
+        print(f"Output: {row['cv_pdf_path']}")
         return
     else:
         updater = KnowledgeUpdater(args.master_cv, args.proposals, args.audit, args.backups)

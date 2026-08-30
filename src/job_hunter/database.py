@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     reasons TEXT NOT NULL, created_at TEXT NOT NULL,
     application_status TEXT NOT NULL DEFAULT 'NEW', first_seen_at TEXT,
     last_seen_at TEXT, last_scored_at TEXT, cv_generated_at TEXT, applied_at TEXT,
+    cv_pdf_path TEXT, cv_pdf_status TEXT NOT NULL DEFAULT 'PDF_NOT_GENERATED',
+    cv_pdf_generated_at TEXT, cv_pdf_pages INTEGER,
     application_method TEXT NOT NULL DEFAULT 'UNKNOWN', application_email TEXT,
     application_url TEXT, application_instructions TEXT NOT NULL DEFAULT '[]',
     email_subject TEXT, email_body TEXT,
@@ -85,6 +87,8 @@ class JobDatabase:
                 "published_at": "TEXT", "discovered_at": "TEXT", "application_status": "TEXT NOT NULL DEFAULT 'NEW'",
                 "first_seen_at": "TEXT", "last_seen_at": "TEXT", "last_scored_at": "TEXT",
                 "cv_generated_at": "TEXT", "applied_at": "TEXT",
+                "cv_pdf_path": "TEXT", "cv_pdf_status": "TEXT NOT NULL DEFAULT 'PDF_NOT_GENERATED'",
+                "cv_pdf_generated_at": "TEXT", "cv_pdf_pages": "INTEGER",
                 "application_method": "TEXT NOT NULL DEFAULT 'UNKNOWN'", "application_email": "TEXT",
                 "application_url": "TEXT", "application_instructions": "TEXT NOT NULL DEFAULT '[]'",
                 "email_subject": "TEXT", "email_body": "TEXT",
@@ -214,9 +218,23 @@ class JobDatabase:
                 email_draft_status='GENERATED',email_message_id=? WHERE id=?""", (recipient, subject, body, message_id, job_id))
 
     def approve_email_draft(self, job_id: int) -> None:
+        row = self.get_job_row(job_id)
+        if row is None: raise KeyError(f"Job not found: {job_id}")
+        if row.get("cv_pdf_status") != "PDF_VALID":
+            raise ValueError("A VALID PDF CV is required before approving an email")
         with self._connect() as connection:
             cursor = connection.execute("UPDATE jobs SET email_draft_status='APPROVED' WHERE id=? AND email_draft_status='GENERATED'", (job_id,))
             if cursor.rowcount != 1: raise ValueError("Only a GENERATED email can be approved")
+
+    def set_cv_pdf_result(self, job_id: int, path: str | Path, status: str, pages: int,
+                          at: str | None = None) -> None:
+        allowed = {"PDF_NOT_GENERATED", "PDF_GENERATED", "PDF_VALID", "PDF_INVALID", "TOO_LONG"}
+        if status not in allowed: raise ValueError(f"Invalid PDF status: {status}")
+        with self._connect() as connection:
+            cursor = connection.execute("""UPDATE jobs SET cv_pdf_path=?,cv_pdf_status=?,
+                cv_pdf_generated_at=?,cv_pdf_pages=? WHERE id=?""",
+                (str(path), status, at or utc_now(), int(pages), job_id))
+            if cursor.rowcount != 1: raise KeyError(f"Job not found: {job_id}")
 
     def mark_email_sent(self, job_id: int, message_id: str, channel: str = "EMAIL", at: str | None = None) -> None:
         timestamp = at or utc_now()

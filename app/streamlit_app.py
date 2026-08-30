@@ -65,8 +65,16 @@ def _render_job_detail(database: JobDatabase, row: dict, master_cv_path: str) ->
             database.set_application_status(job_id, "SKIPPED"); st.rerun()
     else: st.warning("REJECT: la generación normal de CV está deshabilitada.")
     cv_path = Path("outputs/cvs") / str(job_id) / "cv.html"
+    pdf_path = Path("outputs/cvs") / str(job_id) / "cv.pdf"
     if cv_path.exists():
-        st.download_button("Ver / descargar CV", cv_path.read_text(encoding="utf-8"), "cv.html", "text/html", key=f"view-{job_id}")
+        st.download_button("Ver HTML", cv_path.read_text(encoding="utf-8"), "cv.html", "text/html", key=f"view-{job_id}")
+        pdf_status = row.get("cv_pdf_status") or "PDF_NOT_GENERATED"
+        pages = row.get("cv_pdf_pages")
+        if pdf_status == "PDF_VALID" and pdf_path.exists():
+            st.success(f"PDF: VALID · {pages} página{'s' if pages != 1 else ''}")
+            st.download_button("Descargar PDF", pdf_path.read_bytes(), "cv.pdf", "application/pdf", key=f"pdf-{job_id}")
+        elif pdf_status not in {"PDF_NOT_GENERATED", None}:
+            st.warning(f"PDF inválido: {pdf_status}")
         if status == "CV_GENERATED" and st.button("Aprobar para postular", key=f"approve-{job_id}"):
             database.set_application_status(job_id, "APPROVED_TO_APPLY"); st.rerun()
     if status == "APPROVED_TO_APPLY" and st.button("Marcar como postulada", key=f"applied-{job_id}"):
@@ -100,10 +108,11 @@ def _render_application_channel(database: JobDatabase, row: dict, master_cv_path
             database.mark_link_applied(job_id); st.rerun()
     if method not in {"EMAIL", "LINK_EMAIL"} or selected != "EMAIL": return
     st.write(f'Para: **{row.get("application_email") or "Requiere revisión"}**')
-    st.write(f'CV: {"✅ generado" if cv_path.exists() else "⏳ generar primero"}')
-    if cv_path.exists() and cv_path.suffix.lower() == ".html": st.caption("HTML temporal de desarrollo; PDF pendiente para envío definitivo.")
+    pdf_path = cv_path.with_suffix(".pdf")
+    pdf_valid = row.get("cv_pdf_status") == "PDF_VALID" and pdf_path.exists()
+    st.write(f'CV PDF: {"✅ válido" if pdf_valid else "⏳ generar/validar primero"}')
     st.write(f'Email: **{row.get("email_draft_status") or "NOT_GENERATED"}**')
-    if row.get("application_email") and cv_path.exists() and st.button("Preparar email", key=f"prepare-email-{job_id}"):
+    if row.get("application_email") and pdf_valid and st.button("Preparar email", key=f"prepare-email-{job_id}"):
         try: prepare_application_email(database.path, job_id, master_cv_path); st.rerun()
         except Exception as exc: st.error(str(exc))
     if row.get("email_draft_status") in {"GENERATED", "APPROVED"}:

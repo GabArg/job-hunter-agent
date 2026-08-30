@@ -11,6 +11,8 @@ requires-python = ">=3.11"
 dependencies = [
   "PyYAML>=6.0",
   "streamlit>=1.36",
+  "pypdf>=5.0",
+  "reportlab>=4.2",
 ]
 
 [project.optional-dependencies]

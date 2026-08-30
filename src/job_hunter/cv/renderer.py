@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import re
 from pathlib import Path
 
 from .models import AdaptedCV
@@ -16,7 +17,7 @@ class HTMLCVRenderer:
         template = self.template_path.read_text(encoding="utf-8")
         replacements = {
             "{{NAME}}": _e(cv.personal.get("name", "")),
-            "{{HEADLINE}}": _e(cv.personal.get("headline", "")),
+            "{{HEADLINE}}": _e(dynamic_professional_title(cv)),
             "{{CONTACT}}": _contact(cv.personal),
             "{{SUMMARY}}": _e(cv.professional_summary),
             "{{SKILLS}}": ", ".join(_e(skill) for skill in cv.skills),
@@ -54,7 +55,8 @@ def _projects(cv: AdaptedCV) -> str:
         return ""
     body = "".join(
         f'<section class="entry"><strong>{_e(section.name)}</strong><div>{_e(section.description)}</div>'
-        f'{_bullets(section.bullets)}<div class="tech">{", ".join(_e(value) for value in section.technologies)}</div></section>'
+        f'{_bullets(section.bullets)}<div class="tech">{", ".join(_e(value) for value in section.technologies)}</div>'
+        f'{" ".join(_html_link(value) for value in section.links)}</section>'
         for section in cv.project_sections
     )
     return f"<h2>Proyectos</h2>{body}"
@@ -83,9 +85,32 @@ def _bullets(bullets) -> str:
 
 
 def _contact(personal: dict[str, str]) -> str:
-    keys = ("location", "linkedin", "github")
-    return " · ".join(_e(personal.get(key, "")) for key in keys if personal.get(key))
+    keys = ("location", "email", "linkedin", "github")
+    values = []
+    for key in keys:
+        value = personal.get(key, "")
+        if not value: continue
+        if key == "location": values.append(_e(value))
+        elif key == "email": values.append(f'<a href="mailto:{_e(value)}">{_e(value)}</a>')
+        else: values.append(_html_link(value))
+    return " · ".join(values)
+
+
+def _html_link(value: str) -> str:
+    href = value if value.startswith(("https://", "http://")) else "https://" + value
+    return f'<a href="{_e(href)}">{_e(value)}</a>'
 
 
 def _e(value: str) -> str:
     return html.escape(str(value), quote=True)
+
+
+def dynamic_professional_title(cv: AdaptedCV) -> str:
+    """Use the target role without carrying unsupported seniority into the heading."""
+    value = re.sub(r"\b(?:senior|ssr\.?|sr\.?|lead|staff|principal)\b", "", cv.job_title,
+                   flags=re.IGNORECASE)
+    value = " ".join(value.split()).strip(" -/|")
+    if not value:
+        return cv.personal.get("headline", "")
+    value = value.title()
+    return re.sub(r"\b(Bi|Sql|Ai)\b", lambda match: match.group(1).upper(), value)

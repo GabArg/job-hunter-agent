@@ -114,12 +114,37 @@ Generar un CV para una oferta `APPLY` o `REVIEW` almacenada en SQLite:
 ```powershell
 python -m job_hunter.cli cv --job-id 123 --master-cv private/master_cv.yaml --output outputs/
 python -m job_hunter.cli cv --url https://jobs.example/job --master-cv private/master_cv.yaml
+python -m job_hunter.cli generate-cv 123 --master-cv private/master_cv.yaml
 ```
 
 El motor determinístico selecciona hechos del CV maestro y conserva
 `source_fact_ids` auditables para cada bullet. El validator bloquea bullets sin
-evidencia, empresas o tecnologías ausentes del maestro. La salida inicial es HTML
-ATS-friendly; no se generan PDFs ni se realizan postulaciones en esta fase.
+evidencia, empresas o tecnologías ausentes del maestro. El HTML se conserva como
+preview/debug y `generate-cv` produce el formato principal de entrega:
+
+```text
+outputs/cvs/<job-id>/cv.html
+outputs/cvs/<job-id>/cv.pdf
+```
+
+### PDF ATS-friendly
+
+El backend local usa ReportLab para composición A4 de texto seleccionable y `pypdf`
+para validar páginas, contenido y contactos. Ambas dependencias se instalan con
+`pip install -e .`; no se utiliza navegador, API ni servicio externo. El renderer
+parte del mismo `AdaptedCV` ya validado y nunca genera hechos ni reescribe el resumen.
+
+Se intenta el layout normal, luego espaciado compacto y finalmente una reducción
+segura de bloques secundarios ya priorizados por el adapter. Nunca baja de 9.5 pt.
+Si todavía supera dos páginas queda en estado `TOO_LONG` y no se habilita para email.
+
+En Windows, si la generación falla, verificar que el entorno virtual esté activo y
+reinstalar las dependencias puras de Python:
+
+```powershell
+python -m pip install --upgrade reportlab pypdf
+python -m job_hunter.cli generate-cv 123
+```
 
 El dashboard permite elegir el CSV, el perfil y la base de datos desde la barra lateral, ejecutar el pipeline y filtrar los resultados.
 

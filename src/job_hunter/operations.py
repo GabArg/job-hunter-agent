@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from .cv import HTMLCVRenderer, adapt_cv, load_master_cv
+from .cv import adapt_cv, load_master_cv, render_cv_pdf
 from .database import JobDatabase
 from .application import EmailComposer, EmailDraft
 
@@ -14,9 +14,13 @@ def generate_job_cv(database_path: str | Path, job_id: int, master_path: str | P
     database = JobDatabase(database_path); job = database.get_job(job_id=job_id)
     if job is None: raise KeyError(f"Job not found: {job_id}")
     adapted = adapt_cv(job, load_master_cv(master_path), allow_reject=allow_reject)
-    output = HTMLCVRenderer().render_to_file(adapted, Path(output_root) / str(job_id) / "cv.html")
+    base = Path(output_root) / str(job_id)
+    rendered = render_cv_pdf(adapted, base / "cv.pdf", base / "cv.html")
+    database.set_cv_pdf_result(job_id, rendered.pdf_path, rendered.validation_status, rendered.page_count)
+    if rendered.validation_status != "PDF_VALID":
+        raise ValueError("PDF CV validation failed: " + "; ".join(rendered.warnings))
     database.set_application_status(job_id, "CV_GENERATED")
-    return output, adapted
+    return rendered.html_path, adapted
 
 
 def prepare_application_email(database_path: str | Path, job_id: int, master_path: str | Path = "private/master_cv.yaml",
@@ -27,8 +31,10 @@ def prepare_application_email(database_path: str | Path, job_id: int, master_pat
     if row["application_method"] == "LINK_EMAIL" and row["selected_application_channel"] != "EMAIL":
         raise ValueError("Select EMAIL before preparing the draft")
     base = Path(output_root) / str(job_id)
-    cv_path = base / "cv.pdf" if (base / "cv.pdf").is_file() else base / "cv.html"
-    draft = EmailComposer().compose(job, load_master_cv(master_path), cv_path)
+    if row.get("cv_pdf_status") != "PDF_VALID" or not (base / "cv.pdf").is_file():
+        raise ValueError("Generate and validate the PDF CV before preparing an email")
+    cv_path = base / "cv.pdf"
+    draft = EmailComposer().compose(job, load_master_cv(master_path), cv_path, allow_html_development=False)
     database.save_email_draft(job_id, draft.recipient, draft.subject, draft.body)
     return draft
 
