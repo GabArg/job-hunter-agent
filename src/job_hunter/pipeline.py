@@ -91,6 +91,11 @@ def process_jobs(
         job.score = result.score
         job.decision = result.decision
         job.reasons = result.as_dict()
+        from .application.detector import detect_application_channel
+        detection = detect_application_channel(job.description, job.url, job.raw_data)
+        job.application_method, job.application_email = detection.method.value, detection.email
+        job.application_url, job.application_instructions = detection.application_url, detection.instructions
+        job.email_subject = detection.required_subject
         inserted += int(database.upsert(job))
     return PipelineResult(jobs=jobs, inserted=inserted, updated=len(jobs) - inserted)
 

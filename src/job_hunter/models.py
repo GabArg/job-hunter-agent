@@ -25,6 +25,18 @@ class Job:
     detected_skills: list[str] = field(default_factory=list)
     job_requirements: list[str] = field(default_factory=list)
     role_subtype: str | None = None
+    application_method: str = "UNKNOWN"
+    application_email: str | None = None
+    application_url: str | None = None
+    application_instructions: list[str] = field(default_factory=list)
+    email_subject: str | None = None
+    email_body: str | None = None
+    email_draft_status: str = "NOT_GENERATED"
+    email_sent_at: str | None = None
+    email_message_id: str | None = None
+    selected_application_channel: str | None = None
+    application_channel_used: str | None = None
+    raw_data: dict[str, Any] | None = field(default=None, repr=False)
     score: float | None = None
     decision: str | None = None
     reasons: dict[str, Any] = field(default_factory=dict)

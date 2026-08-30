@@ -129,6 +129,23 @@ El dashboard permite elegir el CSV, el perfil y la base de datos desde la barra 
 pytest
 ```
 
+## Canales de postulación y Gmail
+
+El detector distingue `LINK`, `EMAIL`, `LINK_EMAIL` y `UNKNOWN`. Los emails siguen
+el flujo obligatorio `GENERATED → APPROVED → SENT`; abrir un link nunca marca una
+oferta como postulada. Gmail está preparado como límite OAuth, pero permanece
+inactivo hasta una configuración explícita. No se usa contraseña ni SMTP simple.
+
+Los futuros archivos OAuth deben guardarse únicamente en:
+
+```text
+private/gmail/client_secret.json
+private/gmail/token.json
+```
+
+Todo `private/` está ignorado por Git. La aplicación nunca activa Gmail ni envía
+emails automáticamente durante discovery, tests o generación de CV.
+
 ## Formato de entrada
 
 El CSV acepta las columnas `title`, `company`, `location`, `work_mode`, `description`, `source` y `url`. La URL es obligatoria y se usa como clave única de deduplicación.

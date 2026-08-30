@@ -113,6 +113,7 @@ def raw_to_job(raw: RawJob) -> Job:
         url=canonical_url(raw.url),
         published_at=normalize_datetime(raw.published_at) or raw.published_at,
         discovered_at=raw.discovered_at,
+        raw_data=raw.raw_data,
     )
 
 

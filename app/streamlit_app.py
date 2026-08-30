@@ -12,7 +12,8 @@ from job_hunter.database import JobDatabase
 from job_hunter.discovery.factory import build_sources
 from job_hunter.discovery.lock import DiscoveryAlreadyRunning, DiscoveryLock
 from job_hunter.knowledge import KnowledgeUpdater
-from job_hunter.operations import generate_job_cv, next_schedule_time
+from job_hunter.operations import generate_job_cv, next_schedule_time, prepare_application_email
+from job_hunter.application import EmailDraft, GmailEmailProvider, send_approved_email
 from job_hunter.pipeline import run_discovery_pipeline
 from job_hunter.discovery.matching import parse_datetime
 from job_hunter.scorer import normalize_reason_list
@@ -63,7 +64,68 @@ def _render_job_detail(database: JobDatabase, row: dict, master_cv_path: str) ->
         if status == "CV_GENERATED" and st.button("Aprobar para postular", key=f"approve-{job_id}"):
             database.set_application_status(job_id, "APPROVED_TO_APPLY"); st.rerun()
     if status == "APPROVED_TO_APPLY" and st.button("Marcar como postulada", key=f"applied-{job_id}"):
-        database.set_application_status(job_id, "APPLIED"); st.rerun()
+        if row.get("selected_application_channel") == "LINK" or row.get("application_method") == "LINK":
+            database.mark_link_applied(job_id); st.rerun()
+        else: st.warning("Seleccioná el canal usado antes de marcar la postulación.")
+    _render_application_channel(database, row, master_cv_path, cv_path)
+
+
+def _render_application_channel(database: JobDatabase, row: dict, master_cv_path: str, cv_path: Path) -> None:
+    st.divider(); st.subheader("Canal de postulación")
+    method, job_id = str(row.get("application_method") or "UNKNOWN"), int(row["id"])
+    st.write(f"Método detectado: **{method.replace('_', ' + ')}**")
+    instructions = json.loads(row.get("application_instructions") or "[]")
+    if instructions: st.write("**Instrucciones:**", instructions)
+    if method == "UNKNOWN": st.warning("No se pudo determinar un canal seguro."); return
+    if method == "LINK_EMAIL":
+        available = {"Postulación web": "LINK", "Postulación por email": "EMAIL"}
+        current = row.get("selected_application_channel")
+        choice = st.radio("Elegir canal", list(available), index=0 if current != "EMAIL" else 1, key=f"channel-{job_id}")
+        if st.button("Confirmar canal", key=f"channel-save-{job_id}"):
+            database.select_application_channel(job_id, available[choice]); st.rerun()
+    elif not row.get("selected_application_channel"):
+        database.select_application_channel(job_id, method)
+        row = database.get_job_row(job_id) or row
+    selected = row.get("selected_application_channel") or (method if method in {"LINK", "EMAIL"} else None)
+    if method in {"LINK", "LINK_EMAIL"}:
+        st.link_button("Abrir postulación", row.get("application_url") or row["url"])
+        st.caption("Abrir el enlace no cambia el estado de la vacante.")
+        if selected == "LINK" and st.button("Marcar como postulada por link", key=f"link-applied-{job_id}"):
+            database.mark_link_applied(job_id); st.rerun()
+    if method not in {"EMAIL", "LINK_EMAIL"} or selected != "EMAIL": return
+    st.write(f'Para: **{row.get("application_email") or "Requiere revisión"}**')
+    st.write(f'CV: {"✅ generado" if cv_path.exists() else "⏳ generar primero"}')
+    if cv_path.exists() and cv_path.suffix.lower() == ".html": st.caption("HTML temporal de desarrollo; PDF pendiente para envío definitivo.")
+    st.write(f'Email: **{row.get("email_draft_status") or "NOT_GENERATED"}**')
+    if row.get("application_email") and cv_path.exists() and st.button("Preparar email", key=f"prepare-email-{job_id}"):
+        try: prepare_application_email(database.path, job_id, master_cv_path); st.rerun()
+        except Exception as exc: st.error(str(exc))
+    if row.get("email_draft_status") in {"GENERATED", "APPROVED"}:
+        with st.form(f"email-edit-{job_id}"):
+            recipient = st.text_input("Destinatario", row.get("application_email") or "")
+            subject = st.text_input("Asunto", row.get("email_subject") or "")
+            body = st.text_area("Cuerpo", row.get("email_body") or "", height=280)
+            if st.form_submit_button("Guardar edición"):
+                database.save_email_draft(job_id, recipient, subject, body); st.rerun()
+    if row.get("email_draft_status") == "GENERATED" and st.button("Aprobar email", key=f"approve-email-{job_id}"):
+        database.approve_email_draft(job_id); st.rerun()
+    if row.get("email_draft_status") == "GENERATED" and st.button("Crear borrador en Gmail", key=f"gmail-draft-{job_id}"):
+        attachment = Path("outputs/cvs") / str(job_id) / "cv.pdf"
+        if not attachment.exists(): attachment = cv_path
+        draft = EmailDraft(row["application_email"], row["email_subject"], row["email_body"], [str(attachment)], attachment.suffix == ".html")
+        try:
+            provider = GmailEmailProvider(); provider.authorize(); message_id = provider.create_draft(draft)
+            database.save_email_draft(job_id, draft.recipient, draft.subject, draft.body, message_id); st.rerun()
+        except Exception as exc: st.error(f"Gmail OAuth no configurado; no se creó ningún borrador: {exc}")
+    if row.get("email_draft_status") == "APPROVED":
+        st.warning(f'Vas a enviar un email real a {row.get("application_email")} con el CV adjunto.')
+        confirmed = st.checkbox("Confirmo el envío", key=f"confirm-send-{job_id}")
+        if st.button("Enviar email", disabled=not confirmed, key=f"send-email-{job_id}"):
+            attachment = Path("outputs/cvs") / str(job_id) / "cv.pdf"
+            if not attachment.exists(): attachment = cv_path
+            draft = EmailDraft(row["application_email"], row["email_subject"], row["email_body"], [str(attachment)], attachment.suffix == ".html")
+            try: send_approved_email(database, job_id, GmailEmailProvider(), draft); st.rerun()
+            except Exception as exc: st.error(f"No se envió y el estado no cambió: {exc}")
 
 st.set_page_config(page_title="Job Hunter Agent", layout="wide")
 st.title("Job Hunter Agent")
@@ -136,7 +198,9 @@ with job_hunt_tab:
     else:
         st.dataframe([{"ID": row["id"], "Decisión": row["decision"], "Score": row["score"],
                        "Estado": row["application_status"], "Empresa": row["company"], "Puesto": row["title"],
-                       "Modalidad": row["work_mode"], "Detectada": _display_time(row["first_seen_at"]), "Oferta": row["url"]}
+                       "Modalidad": row["work_mode"], "Método": row.get("application_channel_used") or row.get("application_method"),
+                       "Destinatario": row.get("application_email") or "", "Aplicada": _display_time(row.get("applied_at")),
+                       "Detectada": _display_time(row["first_seen_at"]), "Oferta": row["url"]}
                       for row in rows], hide_index=True, use_container_width=True,
                      column_config={"Oferta": st.column_config.LinkColumn("Oferta")})
         choices = {f'#{row["id"]} · {row["decision"]} · {row["company"]} · {row["title"]}': row for row in rows}
