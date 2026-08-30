@@ -25,11 +25,11 @@ def build_parser() -> argparse.ArgumentParser:
     discover.add_argument("--query", action="append", help="Query; may be supplied more than once")
     discover.add_argument("--query-group", action="append", help="Configured query group; may be repeated")
     discover.add_argument("--location", help="Optional location filter")
-    discover.add_argument("--limit", type=int, default=10, help="Maximum matches per source")
+    discover.add_argument("--limit", type=int, default=25, help="Maximum matches per target (default: 25)")
     discover.add_argument("--max-age-days", type=int, default=14, help="Maximum posting age (default: 14)")
     discover.add_argument(
         "--source", action="append",
-        choices=("remoteok", "arbeitnow", "greenhouse", "lever", "ashby", "workable", "generic"),
+        choices=("remoteok", "arbeitnow", "greenhouse", "lever", "ashby", "workable", "smartrecruiters", "recruitee", "generic"),
         help="Source; may be supplied more than once (default: all)",
     )
     discover.add_argument("--profile", default="config/profile.yaml", help="YAML profile path")
@@ -38,6 +38,12 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--profile", default="config/profile.yaml")
     report.add_argument("--database", default="data/jobs.db")
     report.add_argument("--sector")
+    probe = subparsers.add_parser("probe-target", help="Probe one configured/public ATS URL without changing config")
+    probe.add_argument("target", help="HTTPS careers URL or company present in profile")
+    probe.add_argument("--profile", default="config/profile.yaml")
+    probes = subparsers.add_parser("probe-targets", help="Probe configured candidate targets only")
+    probes.add_argument("--profile", default="config/profile.yaml")
+    probes.add_argument("--output", default="data/reports")
     cv = subparsers.add_parser("cv", help="Generate a factually validated tailored CV")
     target = cv.add_mutually_exclusive_group(required=True)
     target.add_argument("--job-id", type=int, help="Stored job ID")
@@ -108,6 +114,8 @@ def main() -> None:
         from .discovery.target_registry import TargetRegistry
         profile = load_profile(args.profile); database = JobDatabase(args.database)
         registry = TargetRegistry.from_mapping({"discovery_targets": profile.discovery_targets,
+                                                "active_targets": profile.active_targets,
+                                                "candidate_targets": profile.candidate_targets,
                                                 "career_pages": profile.career_pages,
                                                 "career_targets": profile.career_targets})
         report = database.discovery_report()
@@ -120,6 +128,25 @@ def main() -> None:
             print(f"{row['source']} | {row['target']} | {row['sector']} | {row['health']} | "
                   f"fetched={row['fetched']} relevant={row['relevant']} APPLY={row['apply_count']} "
                   f"REVIEW={row['review_count']} REJECT={row['reject_count']} quality={row['quality_score']}")
+        return
+    elif args.command in {"probe-target", "probe-targets"}:
+        import json
+        from .discovery.probe import probe_target, write_probe_report
+        from .discovery.target_registry import TargetRegistry
+        profile = load_profile(args.profile)
+        registry = TargetRegistry.from_mapping({"discovery_targets": profile.discovery_targets,
+            "active_targets": profile.active_targets, "candidate_targets": profile.candidate_targets,
+            "career_pages": profile.career_pages, "career_targets": profile.career_targets})
+        if args.command == "probe-target":
+            configured = next((item for item in registry.targets if item.company.casefold() == args.target.casefold()), None)
+            result = probe_target(configured or args.target)
+            print(json.dumps(result.as_dict(), ensure_ascii=False, indent=2)); return
+        candidates = [target for target in registry.candidates if target.url]
+        results = [probe_target(target) for target in candidates]
+        output = write_probe_report(results, args.output)
+        print(f"Probed {len(results)} candidates | report={output}")
+        for result in results:
+            print(f"{result.company} | {result.detected_source_type} | {result.status} | jobs={result.jobs_found}")
         return
     elif args.command == "cv":
         job = JobDatabase(args.database).get_job(args.job_id, args.url)

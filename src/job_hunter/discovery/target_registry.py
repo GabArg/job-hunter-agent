@@ -24,6 +24,10 @@ class CompanyTarget:
     enabled: bool = True
     priority: str = "normal"
     notes: str = ""
+    verified_at: str | None = None
+    verification_method: str | None = None
+    jobs_seen_at_verification: int | None = None
+    coverage_tags: list[str] | None = None
     consecutive_failures: int = 0
     health: TargetHealth = TargetHealth.HEALTHY
 
@@ -45,7 +49,12 @@ class TargetRegistry:
 
     @property
     def active(self) -> list[CompanyTarget]:
-        return [target for target in self.targets if target.enabled and target.source_type in {"greenhouse", "lever", "ashby", "workable", "generic"}]
+        supported = {"greenhouse", "lever", "ashby", "workable", "smartrecruiters", "recruitee", "generic"}
+        return [target for target in self.targets if target.enabled and target.source_type in supported]
+
+    @property
+    def candidates(self) -> list[CompanyTarget]:
+        return [target for target in self.targets if not target.enabled or target.source_type == "manual_source_candidate"]
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "TargetRegistry":
@@ -54,6 +63,11 @@ class TargetRegistry:
         for source_type, values in nested.items():
             for value in values or []:
                 targets.append(_target(value, str(source_type)))
+        for value in data.get("active_targets") or []:
+            targets.append(_target(value, str(value.get("source_type") or value.get("ats") or "generic")))
+        for value in data.get("candidate_targets") or []:
+            candidate = dict(value); candidate["enabled"] = False
+            targets.append(_target(candidate, str(candidate.get("source_type") or "manual_source_candidate")))
         for value in data.get("career_pages") or []:
             targets.append(_target(value, "generic"))
         for value in data.get("career_targets") or []:
@@ -106,6 +120,10 @@ def _target(value: dict[str, Any], source_type: str) -> CompanyTarget:
         source_type=source_type.lower(), token=str(value.get("board_token") or value.get("token") or value.get("account") or ""),
         url=str(value.get("url") or value.get("careers_url") or ""), enabled=bool(value.get("enabled", True)),
         priority=str(value.get("priority") or "normal"), notes=str(value.get("notes") or ""),
+        verified_at=str(value.get("verified_at")) if value.get("verified_at") else None,
+        verification_method=str(value.get("verification_method")) if value.get("verification_method") else None,
+        jobs_seen_at_verification=int(value["jobs_seen_at_verification"]) if value.get("jobs_seen_at_verification") is not None else None,
+        coverage_tags=[str(tag) for tag in value.get("coverage_tags") or []],
     )
 
 

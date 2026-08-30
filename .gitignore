@@ -16,3 +16,4 @@ build/
 logs/*
 !logs/.gitkeep
 data/discovery.lock
+data/reports/

@@ -64,6 +64,8 @@ class Profile:
     scoring_weights: dict[str, float]
     discovery_schedule: dict[str, Any] = field(default_factory=dict)
     discovery_targets: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    active_targets: list[dict[str, Any]] = field(default_factory=list)
+    candidate_targets: list[dict[str, Any]] = field(default_factory=list)
     career_pages: list[dict[str, Any]] = field(default_factory=list)
     preferred_companies: list[str] = field(default_factory=list)
     priority_fresh_days: int = 3

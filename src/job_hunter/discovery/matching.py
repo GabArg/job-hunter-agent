@@ -11,10 +11,14 @@ INCOMPATIBLE_REGIONS = (
     r"\bus only\b", r"\bu\.s\. only\b", r"\bunited states only\b",
     r"\beu only\b", r"\beuropean union only\b", r"\buk only\b",
     r"\bunited kingdom only\b", r"\bcanada only\b",
+    r"\bbrazil only\b", r"\bbrasil only\b", r"\bsolo brasil\b",
+    r"\bmexico only\b", r"\bsolo mexico\b", r"\bcolombia only\b", r"\bsolo colombia\b",
+    r"\bchile only\b", r"\bperu only\b",
 )
 ARGENTINA_LOCATIONS = (
     "argentina", "buenos aires", "caba", "amba", "provincia de buenos aires",
-    "remote argentina", "remote latam", "latin america", "latam",
+    "remote argentina", "remote latam", "latin america", "latam", "south america",
+    "remote anywhere in latam",
 )
 
 
@@ -33,13 +37,15 @@ def title_matches(title: str, aliases: list[str], description: str = "") -> bool
 
 def geography_compatible(raw: RawJob, preferred_locations: list[str]) -> tuple[bool, str | None]:
     evidence = normalized(f"{raw.location} {raw.work_mode} {raw.description}")
-    for pattern in INCOMPATIBLE_REGIONS:
-        if re.search(pattern, evidence):
-            return False, f"Restricción geográfica incompatible: {re.search(pattern, evidence).group(0)}"
+    argentina_explicit = any(marker in evidence for marker in ARGENTINA_LOCATIONS) or bool(re.search(r"(?<!\w)ar(?!\w)", evidence))
+    if not argentina_explicit:
+        for pattern in INCOMPATIBLE_REGIONS:
+            if re.search(pattern, evidence):
+                return False, f"Restricción geográfica incompatible: {re.search(pattern, evidence).group(0)}"
     preferences = [normalized(value) for value in preferred_locations]
     wants_argentina = any(value in ARGENTINA_LOCATIONS for value in preferences)
     if wants_argentina:
-        if any(marker in evidence for marker in ARGENTINA_LOCATIONS):
+        if argentina_explicit:
             return True, None
         if "remote" in evidence:
             return False, "Remote sin confirmación de disponibilidad para Argentina/LATAM"
@@ -99,7 +105,10 @@ def parse_datetime(value: str | int | float | None) -> datetime | None:
             if timestamp > 100_000_000_000:  # ATS such as Lever publish Unix milliseconds.
                 timestamp /= 1000
             return datetime.fromtimestamp(timestamp, tz=timezone.utc)
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        text = str(value).strip().replace("Z", "+00:00")
+        if text.upper().endswith(" UTC"):
+            text = text[:-4] + "+00:00"
+        parsed = datetime.fromisoformat(text)
         return parsed.replace(tzinfo=parsed.tzinfo or timezone.utc).astimezone(timezone.utc)
     except (ValueError, TypeError, OSError):
         return None

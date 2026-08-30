@@ -136,7 +136,7 @@ with st.sidebar:
     profile_path = st.text_input("Perfil", "config/profile.yaml")
     database_path = st.text_input("SQLite", "data/jobs.db")
     master_cv_path = st.text_input("Master CV privado", "private/master_cv.yaml")
-    discovery_limit = st.number_input("Límite por fuente", 1, 100, 10)
+    discovery_limit = st.number_input("Límite por target", 1, 100, 25)
     max_age_days = st.number_input("Antigüedad máxima", 1, 365, 14)
     available_sources = ["remoteok", "arbeitnow", "greenhouse", "lever", "ashby", "workable", "generic"]
     source_names = st.multiselect("Fuentes", available_sources, default=["remoteok", "arbeitnow"])

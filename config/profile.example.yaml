@@ -128,6 +128,53 @@ discovery_targets:
     - {company: Telecom, sector: Telecom, enabled: false, notes: Endpoint público compatible no confirmado.}
     - {company: Movistar, sector: Telecom, enabled: false, notes: Endpoint público compatible no confirmado.}
     - {company: Claro, sector: Telecom, enabled: false, notes: Endpoint público compatible no confirmado.}
+# Lista verificada. Estos registros reemplazan por ID cualquier entrada legacy anterior.
+active_targets:
+  - {company: dLocal, sector: Fintech, source_type: lever, token: dlocal, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 53, coverage_tags: [data, operations, commercial, performance]}
+  - {company: ARQ, sector: Fintech, source_type: ashby, token: ARQ, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 32, coverage_tags: [data, operations]}
+  - {company: Koyfin, sector: Fintech, source_type: ashby, token: Koyfin, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 1, coverage_tags: []}
+  - {company: Paymentology, sector: Fintech, source_type: ashby, token: paymentology, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 20, coverage_tags: []}
+  - {company: Taptap Send, sector: Fintech, source_type: ashby, token: TaptapSend, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 31, coverage_tags: [data, operations]}
+  - {company: Qodea, sector: Consulting, source_type: workable, token: qodea, enabled: true, priority: normal, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 30, coverage_tags: [data, operations]}
+  - {company: Addi, sector: Fintech, source_type: ashby, token: addi, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 25, coverage_tags: [data, business, operations]}
+  - {company: Ramp, sector: Fintech, source_type: ashby, token: ramp, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 139, coverage_tags: [data, operations, commercial, reporting, revenue]}
+  - {company: Kiwi, sector: Fintech, source_type: ashby, token: kiwi, enabled: true, priority: normal, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 1, coverage_tags: []}
+  - {company: Sezzle, sector: Fintech, source_type: greenhouse, token: sezzle, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 186, coverage_tags: [data, operations, reporting]}
+  - {company: Insight Assurance, sector: Consulting, source_type: greenhouse, token: insightassurance, enabled: true, priority: normal, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 5, coverage_tags: []}
+  - {company: Sterlington, sector: Consulting, source_type: greenhouse, token: sterlingtonpllc, enabled: true, priority: normal, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 32, coverage_tags: []}
+  - {company: Varicent, sector: SaaS, source_type: greenhouse, token: varicent, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 27, coverage_tags: []}
+  - {company: EBANX, sector: Fintech, source_type: greenhouse, token: ebanx, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 41, coverage_tags: [commercial, performance, revenue]}
+  - {company: Binance, sector: Fintech, source_type: lever, token: binance, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 275, coverage_tags: [data, bi, business, operations, pricing, performance]}
+  - {company: RYZ Labs, sector: Technology, source_type: lever, token: RyzLabs, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 35, coverage_tags: [data]}
+  - {company: Huzzle, sector: Technology, source_type: workable, token: huzzle, enabled: true, priority: normal, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 2411, coverage_tags: [data, bi, operations, commercial, performance, revenue]}
+  - {company: Dev.Pro, sector: Technology, source_type: workable, token: devpro, enabled: true, priority: normal, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 86, coverage_tags: [business]}
+  - {company: Trinetix, sector: Consulting, source_type: workable, token: trinetix, enabled: true, priority: normal, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 34, coverage_tags: []}
+  - {company: Marathon Talent, sector: Fintech, source_type: workable, token: marathon-talent, enabled: true, priority: normal, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 74, coverage_tags: [data, operations, commercial]}
+  - {company: Cocos Capital, sector: Fintech, source_type: recruitee, token: cocoscapital, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 10, coverage_tags: [commercial]}
+  - {company: Bunker DB, sector: SaaS, source_type: recruitee, token: bunkerdb, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 5, coverage_tags: []}
+  - {company: Join Ready, sector: Consulting, source_type: recruitee, token: joinready, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 40, coverage_tags: [data, business, operations]}
+  - {company: AllShore Talent, sector: Consulting, source_type: recruitee, token: allshoretalent, enabled: true, priority: normal, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 2, coverage_tags: [data]}
+  - {company: TransPerfect, sector: Technology, source_type: recruitee, token: transperfect, enabled: true, priority: normal, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 582, coverage_tags: [data, bi, business, operations, performance]}
+  - {company: Trafilea, sector: E-commerce, source_type: recruitee, token: trafilea, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 44, coverage_tags: [data, business, operations, performance]}
+  - {company: ReKluti, sector: Consulting, source_type: recruitee, token: easyapplyrekluti, enabled: true, priority: normal, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 201, coverage_tags: [data, business, operations, commercial]}
+  - {company: PedidosYa / Delivery Hero, sector: E-commerce, source_type: smartrecruiters, token: DeliveryHero, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 100, coverage_tags: [data, bi, operations, pricing, commercial, performance]}
+  - {company: Software Mind, sector: Technology, source_type: smartrecruiters, token: SoftwareMind, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 51, coverage_tags: [data, business]}
+  - {company: Syngenta, sector: Consumer Goods, source_type: smartrecruiters, token: SyngentaGroup, enabled: true, priority: normal, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 100, coverage_tags: [data, business, operations, pricing, commercial, reporting]}
+  - {company: Blend360, sector: Consulting, source_type: smartrecruiters, token: Blend360, enabled: true, priority: high, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 100, coverage_tags: [data, bi, business, operations, customer-analytics]}
+  - {company: Louis Dreyfus Company, sector: Consumer Goods, source_type: smartrecruiters, token: LouisDreyfusCompany, enabled: true, priority: normal, verified_at: '2026-08-30', verification_method: public_ats_json, jobs_seen_at_verification: 100, coverage_tags: [data, business, operations, pricing, commercial]}
+
+candidate_targets:
+  - company: TRM Labs
+    sector: Fintech
+    source_type: greenhouse
+    token: trmlabs
+    url: https://job-boards.greenhouse.io/trmlabs
+    enabled: false
+    verified_at: '2026-08-30'
+    verification_method: public_ats_json
+    jobs_seen_at_verification: 0
+    notes: El endpoint público devolvió HTTP 404 durante la verificación.
+
 career_pages: []
 preferred_companies:
   - Mercado Libre

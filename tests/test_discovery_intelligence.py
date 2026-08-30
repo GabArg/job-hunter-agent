@@ -56,7 +56,8 @@ def test_disabled_target_is_not_consulted_and_legacy_config_works():
     profile = load_profile("config/profile.example.yaml")
     profile = replace(profile,
         discovery_targets={"lever": [{"company": "Off", "board_token": "off", "enabled": False}]},
-        career_pages=[], career_targets=[{"company": "Legacy", "ats": "lever", "board_token": "legacy"}])
+        active_targets=[], candidate_targets=[], career_pages=[],
+        career_targets=[{"company": "Legacy", "ats": "lever", "board_token": "legacy"}])
     sources = build_sources(profile, ["lever"])
     assert [source.name for source in sources] == ["lever:Legacy"]
 

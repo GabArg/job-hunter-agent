@@ -6,7 +6,7 @@ from ..models import Profile
 from .base import JobSource, fetch_text
 from .sources import (
     ArbeitnowSource, AshbySource, GenericCareersSource, GreenhouseSource,
-    LeverSource, RemoteOKSource, WorkableSource,
+    LeverSource, RecruiteeSource, RemoteOKSource, SmartRecruitersSource, WorkableSource,
 )
 from .target_registry import TargetRegistry
 
@@ -15,6 +15,8 @@ ATS_FACTORIES = {
     "lever": LeverSource,
     "ashby": AshbySource,
     "workable": WorkableSource,
+    "recruitee": RecruiteeSource,
+    "smartrecruiters": SmartRecruitersSource,
 }
 
 
@@ -24,7 +26,9 @@ def build_sources(profile: Profile, selected: list[str] | None = None) -> list[J
     sources: list[JobSource] = []
     if include_all or "remoteok" in selected_set: sources.append(RemoteOKSource())
     if include_all or "arbeitnow" in selected_set: sources.append(ArbeitnowSource())
-    mapping = {"discovery_targets": profile.discovery_targets, "career_pages": profile.career_pages, "career_targets": profile.career_targets}
+    mapping = {"discovery_targets": profile.discovery_targets, "active_targets": profile.active_targets,
+               "candidate_targets": profile.candidate_targets, "career_pages": profile.career_pages,
+               "career_targets": profile.career_targets}
     for target in TargetRegistry.from_mapping(mapping).active:
         company, ats = target.company, target.source_type
         if not company: raise ValueError("Every discovery target requires company")
@@ -46,6 +50,7 @@ def _infer_ats(url: str) -> str:
     return next((ats for marker, ats in {
         "greenhouse.io": "greenhouse", "lever.co": "lever", "ashbyhq.com": "ashby",
         "workable.com": "workable",
+        "smartrecruiters.com": "smartrecruiters", "recruitee.com": "recruitee",
     }.items() if marker in host), "generic")
 
 
