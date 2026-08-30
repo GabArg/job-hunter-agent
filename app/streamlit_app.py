@@ -19,7 +19,8 @@ from job_hunter.discovery.matching import parse_datetime
 from job_hunter.scorer import normalize_reason_list
 from job_hunter.semantics import display_concepts
 from job_hunter.normalizer import normalize_work_mode
-from job_hunter.importer import ImportStatus, import_job_from_url, import_manual_job
+from job_hunter.importer import (ImportStatus, import_job_from_url, import_manual_job,
+                                 is_internal_job_url)
 
 
 def _display_time(value) -> str:
@@ -38,7 +39,10 @@ def _render_job_detail(database: JobDatabase, row: dict, master_cv_path: str) ->
     st.write(f'**{row["company"]}** · {row["location"]} · {_display_work_mode(row["work_mode"], row["description"])} · {row["source"]}')
     st.write(f'Publicada: {_display_time(row["published_at"])} · Detectada: {_display_time(row["first_seen_at"])} · Score: {row["score"]:.2f}')
     st.write(f'Estado operativo: **{row["application_status"]}**')
-    st.markdown(f'[Abrir oferta original]({row["url"]})')
+    if is_internal_job_url(str(row["url"])):
+        st.caption("Sin URL pública: vacante importada desde texto.")
+    else:
+        st.markdown(f'[Abrir oferta original]({row["url"]})')
     cols = st.columns(4)
     requirements = reasons.get("job_requirements") or []
     matched = reasons.get("matched_requirements") or reasons.get("matched_skills") or []
@@ -214,7 +218,11 @@ with job_hunt_tab:
                 manual_mode = columns[1].selectbox("Modalidad", ["unknown", "remote", "hybrid", "onsite"])
                 manual_date = st.text_input("Fecha de publicación opcional")
                 manual_description = st.text_area("Texto completo de la vacante", height=220)
-                save_manual = st.form_submit_button("Guardar y analizar", disabled=not manual_description.strip())
+                missing_manual = [label for label, value in (("empresa", manual_company), ("puesto", manual_title),
+                                  ("descripción", manual_description)) if not value.strip()]
+                if missing_manual:
+                    st.caption("Completá los campos obligatorios: " + ", ".join(missing_manual) + ".")
+                save_manual = st.form_submit_button("Guardar y analizar", disabled=bool(missing_manual))
             if save_manual:
                 method = "PASTED_TEXT" if import_mode == "Texto pegado" else "MANUAL_FORM"
                 st.session_state["import_result"] = import_manual_job({"url": manual_url, "company": manual_company,
@@ -270,7 +278,8 @@ with job_hunt_tab:
                        "Sector": row.get("sector") or "Other", "Nueva <72h": "🆕" if row.get("priority_fresh") else "",
                        "Modalidad": _display_work_mode(row["work_mode"], row["description"]), "Método": row.get("application_channel_used") or row.get("application_method"),
                        "Destinatario": row.get("application_email") or "", "Aplicada": _display_time(row.get("applied_at")),
-                       "Detectada": _display_time(row["first_seen_at"]), "Oferta": row["url"]}
+                       "Detectada": _display_time(row["first_seen_at"]),
+                       "Oferta": "" if is_internal_job_url(str(row["url"])) else row["url"]}
                       for row in rows], hide_index=True, use_container_width=True,
                      column_config={"Oferta": st.column_config.LinkColumn("Oferta")})
         choices = {f'#{row["id"]} · {row["decision"]} · {row["company"]} · {row["title"]}': row for row in rows}

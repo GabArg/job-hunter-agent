@@ -501,6 +501,26 @@ class JobDatabase:
                 return dict(row)
         return None
 
+    def promote_manual_job_url(self, job_id: int, public_url: str) -> None:
+        """Replace an internal manual key with a reviewed public URL without creating a row."""
+        from .application.detector import detect_application_channel
+        from .discovery.aggregator import canonical_url
+        from .importer.url_importer import is_internal_job_url
+
+        canonical = canonical_url(public_url)
+        if not canonical.startswith(("http://", "https://")):
+            raise ValueError("A public HTTP(S) URL is required")
+        row = self.get_job_row(job_id)
+        if row is None: raise KeyError(f"Job not found: {job_id}")
+        if not is_internal_job_url(str(row["url"] or "")):
+            return
+        detection = detect_application_channel(str(row["description"] or ""), canonical)
+        with self._connect() as connection:
+            connection.execute("""UPDATE jobs SET url=?,import_source_url=?,application_method=?,
+                application_email=?,application_url=?,application_instructions=?,email_subject=? WHERE id=?""",
+                (canonical, canonical, detection.method.value, detection.email, detection.application_url,
+                 json.dumps(detection.instructions, ensure_ascii=False), detection.required_subject, job_id))
+
     def record_import(self, *, source_url: str | None, company: str | None, title: str | None,
                       source_type: str, result: str, job_id: int | None = None,
                       duplicate_job_id: int | None = None, warnings: list[str] | None = None,

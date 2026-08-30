@@ -9,7 +9,7 @@ from urllib.parse import urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from ..database import JobDatabase
-from ..discovery.aggregator import canonical_url
+from ..discovery.aggregator import canonical_url, job_fingerprint
 from ..models import Job, Profile
 from ..normalizer import normalize_work_mode
 from ..pipeline import process_job
@@ -103,18 +103,22 @@ def import_job_from_url(url: str, profile: Profile, database: JobDatabase, *, fe
 
 
 def import_manual_job(data: dict, profile: Profile, database: JobDatabase, *, method: str = "MANUAL_FORM") -> ImportResult:
-    url = str(data.get("url") or "").strip() or f"https://manual.invalid/{datetime.now(timezone.utc).timestamp()}"
-    if not url.startswith("https://manual.invalid"):
-        try: _basic_validate(url)
-        except ValueError as exc: return _record_failure(database, url, "user", ImportStatus.UNSUPPORTED, str(exc), method)
+    supplied_url = str(data.get("url") or "").strip()
+    if supplied_url:
+        try: _basic_validate(supplied_url)
+        except ValueError as exc: return _record_failure(database, supplied_url, "user", ImportStatus.UNSUPPORTED, str(exc), method)
     raw_description = str(data.get("description") or "")
-    description = sanitize_html(raw_description)
+    description = _sanitize_manual_text(raw_description)
     title, company, location = _infer_manual_fields(raw_description, str(data.get("title") or ""),
                                                      str(data.get("company") or ""), str(data.get("location") or ""))
+    if "title" in data and not str(data.get("title") or "").strip(): title = ""
+    if "company" in data and not str(data.get("company") or "").strip(): company = ""
+    url = canonical_url(supplied_url) if supplied_url else _manual_url(title, company, location, description)
     extracted = ExtractedJob(title, company, location,
         normalize_work_mode(data.get("work_mode"), description), description,
         str(data.get("published_at") or "") or None, url)
-    return _persist_extracted(extracted, profile, database, "user", canonical_url(url), method, method)
+    source_type = "text" if method == "PASTED_TEXT" else "user"
+    return _persist_extracted(extracted, profile, database, source_type, url, method, method)
 
 
 def _persist_extracted(extracted: ExtractedJob, profile: Profile, database: JobDatabase, source_type: str,
@@ -130,6 +134,8 @@ def _persist_extracted(extracted: ExtractedJob, profile: Profile, database: JobD
               imported_at=now, import_source_url=canonical, import_method=import_method)
     duplicate = database.find_duplicate_job(job, extracted.url)
     if duplicate:
+        if _is_public_url(canonical) and is_internal_job_url(str(duplicate.get("url") or "")):
+            database.promote_manual_job_url(int(duplicate["id"]), canonical)
         result = ImportResult(ImportStatus.DUPLICATE, source_type, canonical, job.title, job.company, job.location,
             job.work_mode, job.description, job.published_at, duplicate_job_id=int(duplicate["id"]),
             job_id=int(duplicate["id"]), extraction_method=extraction_method, decision=duplicate["decision"],
@@ -183,3 +189,22 @@ def _infer_manual_fields(text: str, title: str, company: str, location: str) -> 
         if field == "company" and not company and match: company = match.group(1).strip()
         if field == "location" and not location and match: location = match.group(1).strip()
     return title, company, location
+
+
+def _manual_url(title: str, company: str, location: str, description: str) -> str:
+    candidate = Job(title, company, location, "unknown", description, "manual:text", "")
+    return f"manual://{job_fingerprint(candidate)}"
+
+
+def _sanitize_manual_text(value: str) -> str:
+    lines = [sanitize_html(line) for line in re.split(r"[\r\n]+", value or "")]
+    return "\n".join(line for line in lines if line).strip()
+
+
+def is_internal_job_url(value: str) -> bool:
+    lowered = (value or "").strip().casefold()
+    return lowered.startswith("manual://") or lowered.startswith("https://manual.invalid/")
+
+
+def _is_public_url(value: str) -> bool:
+    return urlsplit(value).scheme in {"http", "https"}

@@ -69,7 +69,11 @@ def detect_language(text: str) -> JobLanguage:
 
 
 def _required_subject(text: str) -> str | None:
-    match = re.search(r"(?:asunto|subject)\s*(?:obligatorio|required)?\s*[:\-]\s*([^\n.;]{3,100})", text or "", re.I)
+    match = re.search(
+        r"(?:asunto|subject)\s*(?:obligatorio|required)?\s*[:\-]\s*"
+        r"([^\n.;]{3,100}?)(?=\s+(?:se\s+(?:valoran?|requieren?|buscan?)|buscamos|requisitos?|enviar|send)\b|[\n.;]|$)",
+        text or "", re.I,
+    )
     return match.group(1).strip() if match else None
 
 

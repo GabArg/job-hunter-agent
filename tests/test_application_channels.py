@@ -139,8 +139,8 @@ def test_email_edit_resets_to_generated_before_reapproval(tmp_path):
     assert row["email_draft_status"] == "GENERATED" and row["email_subject"] == "Edited subject"
 
 
-def test_gmail_is_inactive_and_private_credentials_are_ignored():
-    with pytest.raises(RuntimeError): GmailEmailProvider().authorize()
+def test_gmail_is_inactive_and_private_credentials_are_ignored(tmp_path):
+    with pytest.raises(RuntimeError): GmailEmailProvider(tmp_path / "gmail-not-configured").authorize()
     ignore = Path(".gitignore").read_text(encoding="utf-8")
     assert "private/" in ignore
 
