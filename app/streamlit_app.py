@@ -218,17 +218,21 @@ with job_hunt_tab:
                 manual_mode = columns[1].selectbox("Modalidad", ["unknown", "remote", "hybrid", "onsite"])
                 manual_date = st.text_input("Fecha de publicación opcional")
                 manual_description = st.text_area("Texto completo de la vacante", height=220)
-                missing_manual = [label for label, value in (("empresa", manual_company), ("puesto", manual_title),
-                                  ("descripción", manual_description)) if not value.strip()]
-                if missing_manual:
-                    st.caption("Completá los campos obligatorios: " + ", ".join(missing_manual) + ".")
-                save_manual = st.form_submit_button("Guardar y analizar", disabled=bool(missing_manual))
+                save_manual = st.form_submit_button("Guardar y analizar")
             if save_manual:
-                method = "PASTED_TEXT" if import_mode == "Texto pegado" else "MANUAL_FORM"
-                st.session_state["import_result"] = import_manual_job({"url": manual_url, "company": manual_company,
-                    "title": manual_title, "location": manual_location, "work_mode": manual_mode,
-                    "published_at": manual_date, "description": manual_description}, profile, database, method=method)
-                st.rerun()
+                company = manual_company.strip()
+                title = manual_title.strip()
+                description = manual_description.strip()
+                missing_manual = [label for label, value in (("empresa", company), ("puesto", title),
+                                  ("descripción", description)) if not value]
+                if missing_manual:
+                    st.error("Faltan campos obligatorios: " + ", ".join(missing_manual))
+                else:
+                    method = "PASTED_TEXT" if import_mode == "Texto pegado" else "MANUAL_FORM"
+                    st.session_state["import_result"] = import_manual_job({"url": manual_url, "company": company,
+                        "title": title, "location": manual_location, "work_mode": manual_mode,
+                        "published_at": manual_date, "description": description}, profile, database, method=method)
+                    st.rerun()
 
     action_row = st.columns([1, 3])
     if action_row[0].button("Buscar ofertas ahora", type="primary", use_container_width=True):

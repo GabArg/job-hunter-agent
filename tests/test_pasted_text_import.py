@@ -66,6 +66,13 @@ def test_internal_url_is_not_exposed_as_dashboard_link():
     assert "Sin URL pública" in source
 
 
+def test_manual_form_submit_is_not_dynamically_disabled():
+    source = Path("app/streamlit_app.py").read_text(encoding="utf-8")
+    assert 'save_manual = st.form_submit_button("Guardar y analizar")' in source
+    assert 'form_submit_button("Guardar y analizar", disabled=' not in source
+    assert 'st.error("Faltan campos obligatorios: " + ", ".join(missing_manual))' in source
+
+
 def test_adding_real_url_promotes_existing_job_without_duplicate(tmp_path):
     database = JobDatabase(tmp_path / "jobs.db")
     first = import_manual_job(data(), PROFILE, database, method="PASTED_TEXT")
