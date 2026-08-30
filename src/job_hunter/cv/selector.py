@@ -12,6 +12,12 @@ ROLE_TAGS = {
     "business": ["business-analysis", "kpi", "reporting", "decision-making", "processes", "stakeholders", "operations"],
     "operations": ["operations", "processes", "kpi", "automation", "root-cause", "optimization"],
     "data": ["sql", "python", "power-bi", "data-quality", "analytics", "reporting"],
+    "bi": ["power-bi", "dax", "sql", "excel", "data-visualization", "business-intelligence", "business-analytics", "reporting"],
+    "data-science": ["python", "pandas", "numpy", "scikit-learn", "machine-learning", "sql"],
+    "data-engineering": ["sql", "postgresql", "apis", "json", "jsonl", "etl", "data-ingestion", "python", "linux", "aws", "oci"],
+    "cloud": ["aws", "oci", "linux", "networking", "cloud"],
+    "ai-automation": ["generative-ai", "n8n", "ai-agents", "chatbots", "python", "automation"],
+    "security": ["security-fundamentals", "linux", "sql", "python", "networking"],
 }
 TERM_TAGS = {
     "power bi": "power-bi", "kpis": "kpi", "kpi": "kpi", "procesos": "processes",
@@ -21,10 +27,19 @@ TERM_TAGS = {
     "sql": "sql", "python": "python", "excel": "excel", "pricing": "pricing",
     "costos": "costs", "logistica": "logistics", "logística": "logistics", "riesgo": "risk",
     "fintech": "fintech", "quantitative": "quantitative", "churn": "churn",
-    "etl": "etl", "eda": "eda",
+    "etl": "etl", "eda": "eda", "pandas": "pandas", "numpy": "numpy",
+    "machine learning": "machine-learning", "scikit-learn": "scikit-learn", "sklearn": "scikit-learn",
+    "postgresql": "postgresql", "dax": "dax",
+    "api rest": "apis", "apis rest": "apis", "rest api": "apis", "json": "json", "jsonl": "jsonl",
+    "ingesta de datos": "data-ingestion", "data ingestion": "data-ingestion",
+    "linux": "linux", "aws": "aws", "oci": "oci", "oracle cloud": "oci",
+    "networking": "networking", "redes": "networking", "security": "security-fundamentals",
     "automation": "automation", "automatizacion": "automation", "automatización": "automation",
     "workflow automation": "automation", "apis": "apis", "api": "apis",
     "inteligencia artificial": "generative-ai", "ia": "generative-ai",
+    "generative ai": "generative-ai", "ia generativa": "generative-ai", "n8n": "n8n",
+    "ai agents": "ai-agents", "agentes ia": "ai-agents", "agentes de ia": "ai-agents",
+    "chatbot": "chatbots", "chatbots": "chatbots",
 }
 IMPACT_TAGS = {
     "business-impact", "optimization", "costs", "profitability", "decision-making", "customers",
@@ -47,6 +62,12 @@ class Selection:
 def extract_job_requirements(job: Job) -> tuple[list[str], list[str]]:
     text = _normalize(f"{job.title} {job.description}")
     families = []
+    if any(term in text for term in ("data scientist", "ciencia de datos", "machine learning scientist")): families.append("data-science")
+    if any(term in text for term in ("data engineer", "analytics engineer", "ingenieria de datos", "ingeniero de datos")): families.append("data-engineering")
+    if any(term in text for term in ("bi analyst", "business intelligence", "analista bi")): families.append("bi")
+    if any(term in text for term in ("cloud", "nube", "aws", "oci")): families.append("cloud")
+    if any(term in text for term in ("ai automation", "automatizacion con ia", "agentes de ia", "n8n", "chatbot")): families.append("ai-automation")
+    if any(term in text for term in ("cybersecurity", "ciberseguridad", "network security", "seguridad informatica")): families.append("security")
     if any(term in text for term in ("business", "negocio", "comercial")): families.append("business")
     if any(term in text for term in ("data", "datos", "analytics", "sql", "power bi")): families.append("data")
     if any(term in text for term in ("pricing", "precio", "margen")): families.append("pricing")
@@ -88,12 +109,24 @@ def select_facts(job: Job, master: MasterCV, content_mode: str = "concise") -> S
         projects[index] = chosen
         selected_ids.update(fact.id for fact in chosen)
     course_scores = []
+    security_relevant = "security-fundamentals" in {_normalize_tag(tag) for tag in explicit}
     for index, course in enumerate(master.courses):
+        if _is_security_course(course) and not security_relevant:
+            continue
         score = sum(relevance_score(fact, keywords) for fact in course.facts)
+        score += relevance_score(f"{course.institution} {course.program}", keywords)
+        if _course_specific_match(course, job):
+            score += 30
+        if _is_security_course(course) and security_relevant:
+            score += 12
         if score:
             course_scores.append((score, index))
-            selected_ids.update(fact.id for fact in course.facts if relevance_score(fact, keywords))
-    course_indices = [index for _, index in sorted(course_scores, key=lambda item: (-item[0], item[1]))[:3]]
+    course_limit = 2 if content_mode == "concise" else 3
+    ranked_courses = sorted(course_scores, key=lambda item: (-item[0], item[1]))
+    threshold = ranked_courses[0][0] * 0.35 if ranked_courses else 0
+    course_indices = [index for score, index in ranked_courses if score >= threshold][:course_limit]
+    for index in course_indices:
+        selected_ids.update(fact.id for fact in master.courses[index].facts if relevance_score(fact, keywords))
     omitted = [identifier for identifier in master.factual_ids if identifier not in selected_ids]
     return Selection(keywords, explicit, summary, experience, projects, course_indices, omitted)
 
@@ -102,6 +135,7 @@ def select_skills(job: Job, master: MasterCV, selection: Selection, limit: int =
     text = _normalize(f"{job.title} {job.description}")
     description = _normalize(job.description)
     scored = []
+    role_priorities = _role_skill_priorities(job)
     for index, skill in enumerate(master.all_skills):
         skill_tag = _skill_tag(skill)
         explicit = 12 if _skill_explicit(skill, skill_tag, text, selection.explicit_tags) else 0
@@ -118,9 +152,19 @@ def select_skills(job: Job, master: MasterCV, selection: Selection, limit: int =
         category = next((name for name, values in master.skills_by_category.items() if skill in values), "")
         noise_penalty = 2 if category == "technology" and not explicit else 0
         position = _explicit_position(skill, skill_tag, description)
-        scored.append((explicit + adjacent - noise_penalty, position, index, skill))
+        role_bonus = max(0, 10 - role_priorities.index(skill_tag)) if skill_tag in role_priorities else 0
+        scored.append((explicit + adjacent + role_bonus - noise_penalty, position, index, skill))
     positive = [item for item in sorted(scored, key=lambda item: (-item[0], item[1], item[2])) if item[0] > 0]
-    return [skill for _, _, _, skill in positive[:limit]]
+    selected, seen_concepts = [], set()
+    for _, _, _, skill in positive:
+        concept = _skill_concept(skill)
+        if concept in seen_concepts:
+            continue
+        selected.append(skill)
+        seen_concepts.add(concept)
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 def rank_skills(skills: list[str], keywords: list[str]) -> list[str]:
@@ -200,6 +244,10 @@ def _keyword_in_text(keyword: str, text: str) -> bool:
         "processes": ("proceso", "procesos"),
         "automation": ("automation", "automatizacion", "automatización", "workflow automation"),
         "apis": ("api", "apis"),
+        "data-ingestion": ("ingesta de datos", "data ingestion", "ingestion"),
+        "security-fundamentals": ("security", "seguridad", "cybersecurity", "ciberseguridad"),
+        "ai-agents": ("ai agents", "agentes ia", "agentes de ia"),
+        "chatbots": ("chatbot", "chatbots"),
     }
     terms = aliases.get(_normalize_tag(keyword), (_tag_text(keyword),))
     padded = f" {text} "
@@ -226,7 +274,51 @@ def _explicit_position(skill: str, tag: str, description: str) -> int:
 
 
 def _skill_tag(skill: str) -> str:
-    return _normalize_tag(skill)
+    aliases = {"apis-rest": "apis", "ingesta-de-datos": "data-ingestion"}
+    normalized = _normalize_tag(skill)
+    return aliases.get(normalized, normalized)
+
+
+def _skill_concept(skill: str) -> str:
+    tag = _skill_tag(skill)
+    return "apis" if tag in {"apis", "api"} else tag
+
+
+def _role_skill_priorities(job: Job) -> list[str]:
+    text = _normalize(f"{job.title} {job.description}")
+    families = []
+    patterns = (
+        ("pricing", ("pricing", "precios", "margenes", "rentabilidad")),
+        ("business", ("business analyst", "analista de negocios", "business analysis", "stakeholders", "kpi")),
+        ("operations", ("operations analyst", "analista de operaciones", "process improvement", "mejora de procesos")),
+        ("data-science", ("data scientist", "ciencia de datos", "scikit-learn", "machine learning")),
+        ("data-engineering", ("data engineer", "analytics engineer", "ingenieria de datos", "etl", "data pipeline")),
+        ("bi", ("bi analyst", "business intelligence", "analista bi", "power bi", "dax")),
+        ("ai-automation", ("ai automation", "workflow automation", "automatizacion con ia", "n8n", "chatbot", "ai agents", "agentes de ia")),
+        ("cloud", ("cloud", "nube", "aws", "oci")),
+        ("security", ("cybersecurity", "ciberseguridad", "network security", "seguridad informatica")),
+    )
+    for family, terms in patterns:
+        if any(term in text for term in terms):
+            families.append(family)
+    if not families or any(term in text for term in ("data analyst", "analista de datos", "analytics")):
+        families.append("data")
+    return _unique(tag for family in families for tag in ROLE_TAGS[family])
+
+
+def _is_security_course(course) -> bool:
+    identity = _normalize(f"{course.institution} {course.program}")
+    return "cybersecurity" in identity or "ciberseguridad" in identity
+
+
+def _course_specific_match(course, job: Job) -> bool:
+    job_terms = re.findall(r"[a-z0-9+#]+", _normalize(job.description))
+    course_text = _normalize(" ".join([course.program, *(fact.text for fact in course.facts)]))
+    course_terms = re.findall(r"[a-z0-9+#]+", course_text)
+    job_pairs = {tuple(job_terms[index:index + 2]) for index in range(len(job_terms) - 1)}
+    course_pairs = {tuple(course_terms[index:index + 2]) for index in range(len(course_terms) - 1)}
+    generic = {"data", "datos", "python", "sql", "analytics", "analitica", "analisis", "con", "and", "para", "the", "y"}
+    return any(any(len(term) >= 4 and term not in generic for term in pair) for pair in job_pairs & course_pairs)
 
 
 def _tag_text(tag: str) -> str:
