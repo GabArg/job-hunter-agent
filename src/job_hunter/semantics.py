@@ -28,9 +28,18 @@ CONCEPT_ALIASES: dict[str, tuple[str, ...]] = {
     "service-testing": ("service testing", "api testing", "testing de servicios", "testearlos", "pruebas de servicios"),
     "system-architecture": ("system architecture", "arquitectura de sistemas", "arquitectura de un sistema", "arquitectura de software"),
     "negotiation": ("negotiation", "negociación", "negociacion", "negociando"),
-    "excel": ("excel", "microsoft excel"), "power-bi": ("power bi", "powerbi"), "sql": ("sql",), "python": ("python",),
+    "excel": ("excel", "microsoft excel"), "power-bi": ("power bi", "powerbi"), "dax": ("dax",),
+    "sql": ("sql",), "python": ("python",), "pandas": ("pandas",), "numpy": ("numpy",),
+    "scikit-learn": ("scikit-learn", "scikit learn", "sklearn"), "machine-learning": ("machine learning",),
+    "postgresql": ("postgresql", "postgres"), "json": ("json",), "jsonl": ("jsonl",),
+    "etl": ("etl",), "data-ingestion": ("data ingestion", "ingesta de datos"),
+    "linux": ("linux",), "aws": ("aws", "amazon web services"), "oci": ("oci", "oracle cloud infrastructure"),
+    "networking": ("networking", "redes"), "security-fundamentals": ("security fundamentals", "fundamentos de seguridad"),
     "generative-ai": ("generative ai", "generative artificial intelligence", "inteligencia artificial", "ia", "ia generativa"),
-    "automation": ("automation", "automatización", "automatizacion"), "apis": ("api", "apis"),
+    "automation": ("automation", "automatización", "automatizacion", "workflow automation"),
+    "apis": ("api", "apis", "rest api", "apis rest"), "n8n": ("n8n",),
+    "ai-agents": ("ai agents", "agentes de ia", "agentes ia"), "chatbots": ("chatbot", "chatbots"),
+    "tableau": ("tableau",), "snowflake": ("snowflake",), "dbt": ("dbt",),
 }
 
 ROLE_ALIASES: dict[str, tuple[str, ...]] = {
@@ -72,6 +81,41 @@ def expand_candidate_capabilities(values: Iterable[str]) -> set[str]:
     capabilities = canonicalize_terms(values)
     for skill in tuple(capabilities): capabilities.update(CAPABILITY_IMPLICATIONS.get(skill, set()))
     return capabilities
+
+
+def build_candidate_capabilities(master_cv) -> dict[str, list[str]]:
+    """Build auditable canonical capabilities exclusively from factual master data."""
+    evidence: dict[str, list[str]] = {}
+
+    def add(concept: str, source_id: str) -> None:
+        sources = evidence.setdefault(concept, [])
+        if source_id not in sources:
+            sources.append(source_id)
+
+    for skill in master_cv.all_skills:
+        for concept in canonicalize_terms([skill]):
+            add(concept, f"skill:{skill}")
+    for identifier, value in master_cv.fact_index.items():
+        text = getattr(value, "text", None)
+        if text is None:
+            continue
+        concepts = set(detect_concepts(text))
+        concepts.update(canonicalize_terms(getattr(value, "tags", ())))
+        for concept in concepts:
+            add(concept, identifier)
+    for experience in master_cv.experience:
+        for technology in experience.technologies:
+            for concept in canonicalize_terms([technology]):
+                add(concept, f"{experience.id}:technology:{technology}")
+    for project in master_cv.projects:
+        for technology in project.technologies:
+            for concept in canonicalize_terms([technology]):
+                add(concept, f"{project.id}:technology:{technology}")
+    for concept in tuple(evidence):
+        for implied in CAPABILITY_IMPLICATIONS.get(concept, set()):
+            for source_id in evidence[concept]:
+                add(implied, source_id)
+    return evidence
 
 
 def detect_roles(title: str, description: str = "") -> set[str]:

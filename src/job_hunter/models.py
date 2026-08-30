@@ -88,6 +88,7 @@ class ScoreResult:
     matched_requirements: list[str] = field(default_factory=list)
     candidate_skills: list[str] = field(default_factory=list)
     target_profile_terms: list[str] = field(default_factory=list)
+    matched_requirement_evidence: dict[str, list[str]] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -95,10 +96,13 @@ class ScoreResult:
             "decision": self.decision,
             "matched_skills": self.matched_skills,
             "missing_skills": self.missing_skills,
+            "missing_requirements": self.missing_skills,
             "hard_reject_reasons": self.hard_reject_reasons,
             "positive_reasons": self.positive_reasons,
             "job_requirements": self.job_requirements,
             "matched_requirements": self.matched_requirements,
             "candidate_skills": self.candidate_skills,
+            "candidate_capabilities": self.candidate_skills,
             "target_profile_terms": self.target_profile_terms,
+            "matched_requirement_evidence": self.matched_requirement_evidence,
         }

@@ -105,13 +105,19 @@ def process_jobs(
 ) -> PipelineResult:
     profile = load_profile(profile_path)
     database = JobDatabase(database_path)
+    capability_evidence = _load_master_capabilities()
     inserted = 0
     for job in jobs:
-        inserted += int(process_job(job, profile, database))
+        inserted += int(process_job(job, profile, database, capability_evidence))
     return PipelineResult(jobs=jobs, inserted=inserted, updated=len(jobs) - inserted)
 
 
-def process_job(job: Job, profile, database: JobDatabase) -> bool:
+def process_job(
+    job: Job,
+    profile,
+    database: JobDatabase,
+    candidate_capability_evidence: dict[str, list[str]] | None = None,
+) -> bool:
     from .discovery.target_registry import detect_sector
 
     if not job.url:
@@ -120,7 +126,11 @@ def process_job(job: Job, profile, database: JobDatabase) -> bool:
     detected_sector, detected_confidence = detect_sector(job.company, job.description, job.title)
     if detected_confidence > job.sector_confidence:
         job.sector, job.sector_confidence = detected_sector, detected_confidence
-    result = score_job(job, profile)
+    capability_evidence = candidate_capability_evidence
+    if capability_evidence is None:
+        capability_evidence = _load_master_capabilities()
+    result = score_job(job, profile, capability_evidence)
+    job.detected_skills = list(result.matched_requirements)
     job.score, job.decision, job.reasons = result.score, result.decision, result.as_dict()
     from .application.detector import detect_application_channel
     detection = detect_application_channel(job.description, job.url, job.raw_data)
@@ -160,3 +170,12 @@ def _read_csv(path: str | Path) -> list[Job]:
         if missing:
             raise ValueError(f"CSV is missing columns: {', '.join(sorted(missing))}")
         return [Job(**{column: row[column] for column in REQUIRED_COLUMNS}) for row in reader]
+
+
+def _load_master_capabilities(master_path: str | Path = "private/master_cv.yaml") -> dict[str, list[str]]:
+    path = Path(master_path)
+    if not path.is_file():
+        return {}
+    from .cv.loader import load_master_cv
+    from .semantics import build_candidate_capabilities
+    return build_candidate_capabilities(load_master_cv(path))

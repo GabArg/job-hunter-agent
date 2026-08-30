@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 from .models import Job, Profile, ScoreResult
-from .semantics import canonicalize_terms, display_concepts, expand_candidate_capabilities, roles_match
+from .semantics import display_concepts, expand_candidate_capabilities, roles_match
 
 ENGLISH_RANK = {"none": 0, "basic": 1, "intermediate": 2, "advanced": 3, "fluent": 4, "c1": 4, "c2": 5}
 DEFAULT_REJECTED_SENIORITIES = {"senior", "lead", "staff", "principal"}
 EMPTY_REASON_VALUES = {"", "-", "—", "none", "n/a", "null", "no"}
 
 
-def score_job(job: Job, profile: Profile) -> ScoreResult:
+def score_job(
+    job: Job,
+    profile: Profile,
+    candidate_capability_evidence: dict[str, list[str]] | None = None,
+) -> ScoreResult:
     weights, earned = profile.scoring_weights, 0.0
     positive: list[str] = []; hard_rejects: list[str] = []
     role_match = any(roles_match(job.title, role, job.description) for role in profile.target_roles)
@@ -16,8 +20,14 @@ def score_job(job: Job, profile: Profile) -> ScoreResult:
         earned += weights.get("role", 0); positive.append("El puesto coincide con un rol objetivo")
 
     requirements = list(dict.fromkeys(job.job_requirements))
-    configured_skills = canonicalize_terms(profile.skills)
-    candidate_skills = expand_candidate_capabilities(profile.skills)
+    profile_capabilities = expand_candidate_capabilities(profile.skills)
+    capability_evidence = {
+        concept: [f"profile.skill:{concept}"] for concept in profile_capabilities
+    }
+    for concept, sources in (candidate_capability_evidence or {}).items():
+        current = capability_evidence.setdefault(concept, [])
+        current.extend(source for source in sources if source not in current)
+    candidate_skills = set(capability_evidence)
     matched = [concept for concept in requirements if concept in candidate_skills]
     missing = [concept for concept in requirements if concept not in candidate_skills]
     # Only requirements present in the offer participate in this component. Profile targets never become gaps.
@@ -50,8 +60,9 @@ def score_job(job: Job, profile: Profile) -> ScoreResult:
     score = round(max(0.0, min(100.0, earned / (sum(weights.values()) or 1.0) * 100)), 2)
     decision = "REJECT" if hard_rejects or score < 55 else "APPLY" if score >= 75 else "REVIEW"
     target_terms = list(dict.fromkeys([*profile.target_roles, *profile.skills]))
+    matched_evidence = {concept: capability_evidence[concept] for concept in matched}
     return ScoreResult(score, decision, matched, missing, hard_rejects, positive, requirements, matched,
-                       sorted(configured_skills), target_terms)
+                       sorted(candidate_skills), target_terms, matched_evidence)
 
 
 def normalize_reason_list(values) -> list[str]:
