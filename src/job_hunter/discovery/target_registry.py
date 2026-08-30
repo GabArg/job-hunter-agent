@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+import re
 from typing import Any
 
 import yaml
@@ -90,18 +91,34 @@ class TargetRegistry:
         return _counts(target.sector for target in self.targets)
 
 
-def detect_sector(company: str, description: str) -> tuple[str, float]:
-    text = f"{company} {description}".casefold()
+KNOWN_COMPANY_SECTORS = {
+    "accenture": "Consulting", "kpmg": "Consulting", "deloitte": "Consulting",
+    "pwc": "Consulting", "pricewaterhousecoopers": "Consulting", "ey": "Consulting",
+    "ernst & young": "Consulting", "dlocal": "Fintech", "uala": "Fintech",
+    "ualá": "Fintech", "mercado pago": "Fintech", "pedidosya": "E-commerce",
+    "pedidos ya": "E-commerce", "trafilea": "E-commerce", "globant": "Technology",
+}
+
+
+def detect_sector(company: str, description: str, title: str = "") -> tuple[str, float]:
+    company_text = company.casefold().strip()
+    for known_company, sector in KNOWN_COMPANY_SECTORS.items():
+        if re.search(rf"(?<!\w){re.escape(known_company)}(?!\w)", company_text):
+            return sector, 0.95
+    text = f"{company} {title} {description}".casefold()
     rules = {
-        "Fintech": ("fintech", "payment", "pagos", "billetera", "financial technology"),
+        "Fintech": ("fintech", "payment", "payments", "pagos", "billetera", "financial technology",
+                    "banking infrastructure", "acquiring", "cards"),
         "Banking": ("banco", "banking", "bank "), "Retail": ("retail", "supermercado", "consumo masivo"),
-        "E-commerce": ("e-commerce", "ecommerce", "marketplace", "comercio electrónico"),
-        "Consulting": ("consulting", "consultoría", "consultoria"), "Logistics": ("logística", "logistica", "logistics", "shipping"),
+        "E-commerce": ("e-commerce", "ecommerce", "marketplace", "online retail", "comercio electrónico"),
+        "Consulting": ("consulting", "consultoría", "consultoria", "advisory", "strategy consulting",
+                       "professional services"),
+        "Logistics": ("logística", "logistica", "logistics", "shipping"),
         "Telecom": ("telecom", "telecommunications"), "SaaS": ("saas", "software as a service"),
-        "Technology": ("technology", "tecnología", "tecnologia", "software"),
+        "Technology": ("technology", "tecnología", "tecnologia", "software", "engineering"),
     }
     matches = [sector for sector, signals in rules.items() if any(signal in text for signal in signals)]
-    return (matches[0], 0.65) if len(matches) == 1 else (matches[0], 0.45) if matches else ("Other", 0.2)
+    return (matches[0], 0.7) if len(matches) == 1 else (matches[0], 0.55) if matches else ("Other", 0.2)
 
 
 def quality_score(fetched: int, relevant: int, apply: int, review: int, duplicates: int, errors: int, fresh: int = 0) -> float:

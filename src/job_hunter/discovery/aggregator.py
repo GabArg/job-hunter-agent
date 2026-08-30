@@ -108,7 +108,7 @@ class DiscoveryAggregator:
                     if configured_sector and configured_sector != "Other":
                         job.sector, job.sector_confidence = configured_sector, float(getattr(source, "sector_confidence", 1.0))
                     else:
-                        job.sector, job.sector_confidence = detect_sector(job.company, job.description)
+                        job.sector, job.sector_confidence = detect_sector(job.company, job.description, job.title)
                     job.priority_fresh = is_priority_fresh(job.published_at, priority_fresh_days)
                     url_key = canonical_url(job.url)
                     fingerprint = job_fingerprint(job)

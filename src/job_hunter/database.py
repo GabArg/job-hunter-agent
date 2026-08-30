@@ -382,6 +382,40 @@ class JobDatabase:
                     connection.execute("UPDATE jobs SET work_mode=? WHERE id=?", (after, row["id"]))
         return changes
 
+    def enrich_job_sectors(self, *, manual_only: bool = False, apply: bool = False) -> dict[str, Any]:
+        """Reclassify sectors without touching scoring, decisions, or operational state."""
+        from .discovery.target_registry import detect_sector
+
+        where = "WHERE imported_manually=1" if manual_only else ""
+        changes: list[dict[str, Any]] = []
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""SELECT id,company,title,description,sector,sector_confidence,score,decision,
+                    application_status FROM jobs {where} ORDER BY id"""
+            ).fetchall()
+            for row in rows:
+                after, confidence = detect_sector(row["company"], row["description"], row["title"])
+                before = row["sector"] or "Other"
+                before_confidence = float(row["sector_confidence"] or 0)
+                if confidence <= before_confidence or (after == "Other" and before != "Other"):
+                    continue
+                changes.append({
+                    "job_id": row["id"], "company": row["company"], "title": row["title"],
+                    "sector_before": before, "sector_after": after,
+                    "confidence_before": before_confidence, "confidence_after": confidence,
+                    "score": row["score"], "decision": row["decision"],
+                    "application_status": row["application_status"],
+                })
+        backup = self.create_backup() if apply and changes else None
+        if apply and changes:
+            with self._connect() as connection:
+                connection.executemany(
+                    "UPDATE jobs SET sector=?,sector_confidence=? WHERE id=?",
+                    [(row["sector_after"], row["confidence_after"], row["job_id"]) for row in changes],
+                )
+        return {"changes": changes, "updated": len(changes) if apply else 0,
+                "backup": str(backup) if backup else None}
+
     def find_duplicate_job(self, job: Job, original_url: str | None = None) -> dict[str, Any] | None:
         from .discovery.aggregator import canonical_url, job_fingerprint
         canonical = canonical_url(job.url)

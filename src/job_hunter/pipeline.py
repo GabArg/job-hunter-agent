@@ -112,9 +112,14 @@ def process_jobs(
 
 
 def process_job(job: Job, profile, database: JobDatabase) -> bool:
+    from .discovery.target_registry import detect_sector
+
     if not job.url:
         raise ValueError("Every job must have a URL for deduplication")
     normalize_job(job, profile.skills)
+    detected_sector, detected_confidence = detect_sector(job.company, job.description, job.title)
+    if detected_confidence > job.sector_confidence:
+        job.sector, job.sector_confidence = detected_sector, detected_confidence
     result = score_job(job, profile)
     job.score, job.decision, job.reasons = result.score, result.decision, result.as_dict()
     from .application.detector import detect_application_channel

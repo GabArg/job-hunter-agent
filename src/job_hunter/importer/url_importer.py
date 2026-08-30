@@ -10,7 +10,6 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from ..database import JobDatabase
 from ..discovery.aggregator import canonical_url
-from ..discovery.target_registry import detect_sector
 from ..models import Job, Profile
 from ..normalizer import normalize_work_mode
 from ..pipeline import process_job
@@ -129,7 +128,6 @@ def _persist_extracted(extracted: ExtractedJob, profile: Profile, database: JobD
     job = Job(extracted.title, extracted.company, extracted.location, extracted.work_mode, extracted.description,
               f"manual:{source_type}", canonical, published_at=extracted.published_at, imported_manually=True,
               imported_at=now, import_source_url=canonical, import_method=import_method)
-    job.sector, job.sector_confidence = detect_sector(job.company, job.description)
     duplicate = database.find_duplicate_job(job, extracted.url)
     if duplicate:
         result = ImportResult(ImportStatus.DUPLICATE, source_type, canonical, job.title, job.company, job.location,

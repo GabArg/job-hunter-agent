@@ -55,6 +55,12 @@ def build_parser() -> argparse.ArgumentParser:
     fix_mode = fix_modes.add_mutually_exclusive_group(required=True)
     fix_mode.add_argument("--dry-run", action="store_true")
     fix_mode.add_argument("--apply", action="store_true")
+    enrich = subparsers.add_parser("enrich-job-sectors", help="Safely reclassify persisted job sectors")
+    enrich.add_argument("--database", default="data/jobs.db")
+    enrich.add_argument("--manual-only", action="store_true")
+    enrich_mode = enrich.add_mutually_exclusive_group(required=True)
+    enrich_mode.add_argument("--dry-run", action="store_true")
+    enrich_mode.add_argument("--apply", action="store_true")
     cv = subparsers.add_parser("cv", help="Generate a factually validated tailored CV")
     target = cv.add_mutually_exclusive_group(required=True)
     target.add_argument("--job-id", type=int, help="Stored job ID")
@@ -175,6 +181,16 @@ def main() -> None:
         for row in changes:
             print(f"{row['job_id']} | {row['company']} | {row['title']} | {row['before']} -> {row['after']}")
         print(f"Changed={len(changes) if args.apply else 0} Candidates={len(changes)}")
+        return
+    elif args.command == "enrich-job-sectors":
+        result = JobDatabase(args.database).enrich_job_sectors(manual_only=args.manual_only, apply=args.apply)
+        for row in result["changes"]:
+            print(f"{row['job_id']} | {row['company']} | {row['title']} | "
+                  f"{row['sector_before']} ({row['confidence_before']:.2f}) -> "
+                  f"{row['sector_after']} ({row['confidence_after']:.2f})")
+        print(f"Candidates={len(result['changes'])} Updated={result['updated']}")
+        if result["backup"]:
+            print(f"Backup: {result['backup']}")
         return
     elif args.command == "cv":
         job = JobDatabase(args.database).get_job(args.job_id, args.url)
