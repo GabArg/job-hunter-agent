@@ -30,6 +30,30 @@ def test_detects_email_application(text, email):
     assert result.method == ApplicationMethod.EMAIL and result.email == email
 
 
+@pytest.mark.parametrize("phrase", [
+    "envía tu CV a", "envia tu CV a", "enviá tu CV a", "enviar CV a",
+    "envíanos tu CV a", "envianos tu CV a", "mandá tu CV a", "manda tu CV a",
+    "compartinos tu CV a", "compartí tu CV a", "postulate enviando tu CV a",
+])
+def test_spanish_email_application_variants(phrase):
+    result = detect_application_channel(f"{phrase} rrhh@empresa.com", "")
+    assert result.method == ApplicationMethod.EMAIL
+    assert result.email == "rrhh@empresa.com"
+
+
+def test_recruiting_context_detects_email_without_exact_command():
+    result = detect_application_channel("Postulaciones: rrhh@empresa.com", "")
+    assert result.method == ApplicationMethod.EMAIL and result.email == "rrhh@empresa.com"
+
+
+@pytest.mark.parametrize("text", [
+    "[amesen@infotreeservice.com](mailto:amesen@infotreeservice.com)",
+    r"mailto\:amesen@infotreeservice.com",
+])
+def test_mailto_formats_extract_clean_email(text):
+    assert extract_recruiting_emails(f"Enviar CV a {text}") == ["amesen@infotreeservice.com"]
+
+
 def test_detects_link_link_email_and_unknown():
     assert detect_application_channel("Apply through our portal", "https://company.test/apply").method == ApplicationMethod.LINK
     both = detect_application_channel("Enviar CV a talentos@empresa.com o apply here", "https://company.test/apply")
@@ -41,6 +65,12 @@ def test_extracts_valid_email_and_ignores_non_email_or_support():
     assert extract_recruiting_emails("Contactar talentos@empresa.com") == ["talentos@empresa.com"]
     assert extract_recruiting_emails("No email here") == []
     assert extract_recruiting_emails("Soporte: support@empresa.com") == []
+    assert detect_application_channel("Para consultas técnicas: soporte@empresa.com", "").method == ApplicationMethod.UNKNOWN
+
+
+def test_internal_manual_url_is_not_a_link_channel():
+    result = detect_application_channel("Enviar CV a rrhh@empresa.com", "manual://stable-fingerprint")
+    assert result.method == ApplicationMethod.EMAIL and result.application_url is None
 
 
 def test_multiple_emails_require_review_without_silent_selection():

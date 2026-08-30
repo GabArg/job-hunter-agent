@@ -14,6 +14,8 @@ DESCRIPTION = """Buscamos Asistente BI para elaboración de reportes y tableros.
 Enviar CV a reclutamiento@yccsolutions.com
 Asunto: Asistente BI – Referencia: REC 004 - 2026
 Se valoran Excel, Power BI y análisis de información."""
+INFOTREE_DESCRIPTION = """Si cumples con el perfil y te interesa esta oportunidad,
+envía tu CV en inglés a amesen@infotreeservice.com."""
 
 
 def data(**changes):
@@ -48,6 +50,17 @@ def test_email_and_required_subject_without_url(tmp_path):
     assert row["application_method"] == "EMAIL"
     assert row["application_email"] == "reclutamiento@yccsolutions.com"
     assert row["email_subject"] == "Asistente BI – Referencia: REC 004 - 2026"
+
+
+def test_infotree_pasted_text_detects_email_and_english_cv_instruction(tmp_path):
+    database = JobDatabase(tmp_path / "jobs.db")
+    result = import_manual_job({
+        "company": "InfoTree Service", "title": "Data Analyst", "description": INFOTREE_DESCRIPTION,
+    }, PROFILE, database, method="PASTED_TEXT")
+    row = database.get_job_row(result.job_id)
+    assert row["application_method"] == "EMAIL"
+    assert row["application_email"] == "amesen@infotreeservice.com"
+    assert "CV en inglés" in row["application_instructions"]
 
 
 def test_no_url_deduplicates_by_stable_fingerprint(tmp_path):
