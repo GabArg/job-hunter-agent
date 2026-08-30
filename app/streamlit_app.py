@@ -31,7 +31,7 @@ def _display_time(value) -> str:
 
 
 def _display_work_mode(value, description: str = "") -> str:
-    return normalize_work_mode(value, description).title()
+    return WORK_MODE_LABELS[normalize_work_mode(value, description)]
 
 
 def _compact_source(value) -> str:
@@ -49,11 +49,33 @@ BADGE_ICONS = {
     "LINK_EMAIL": "🔗 + ✉️", "UNKNOWN": "❔", "REMOTE": "🏠",
     "HYBRID": "🔄", "ONSITE": "🏢", "PDF_VALID": "✅", "PDF_INVALID": "⚠️",
 }
+DECISION_LABELS = {"APPLY": "Aplicar", "REVIEW": "Revisar", "REJECT": "Rechazar"}
+STATUS_LABELS = {
+    "NEW": "Nuevo", "SHORTLISTED": "Preseleccionado", "CV_GENERATED": "CV generado",
+    "APPROVED_TO_APPLY": "Aprobado para postular", "APPLIED": "Postulado", "SKIPPED": "Descartado",
+}
+WORK_MODE_LABELS = {"remote": "Remoto", "hybrid": "Híbrido", "onsite": "Presencial", "unknown": "No informado"}
+METHOD_LABELS = {"EMAIL": "Email", "LINK": "Link", "LINK_EMAIL": "Link + Email", "UNKNOWN": "No detectado"}
+
+
+def _display_decision(value) -> str:
+    return DECISION_LABELS.get(str(value or "").upper(), str(value or "—"))
+
+
+def _display_status(value) -> str:
+    return STATUS_LABELS.get(str(value or "NEW").upper(), str(value or "—").replace("_", " ").title())
+
+
+def _display_method(value) -> str:
+    return METHOD_LABELS.get(str(value or "UNKNOWN").upper(), str(value or "—"))
 
 
 def _badge(value, kind: str = "neutral") -> str:
     normalized = str(value or "UNKNOWN").upper()
-    label = normalized.replace("_", " ").title() if normalized not in {"APPLY", "REVIEW", "REJECT"} else normalized
+    label = DECISION_LABELS.get(normalized) or STATUS_LABELS.get(normalized) or METHOD_LABELS.get(normalized)
+    if not label:
+        mode_key = normalized.casefold()
+        label = WORK_MODE_LABELS.get(mode_key, normalized.replace("_", " ").title())
     return f'<span class="jh-badge jh-{kind}">{BADGE_ICONS.get(normalized, "•")} {escape(label)}</span>'
 
 
@@ -101,7 +123,7 @@ def _render_job_detail(database: JobDatabase, row: dict, master_cv_path: str) ->
     technical, eligibility = st.columns(2)
     technical.markdown(_metric_card("Match técnico", f"{float(row.get('score') or 0):.0f}%", "match"), unsafe_allow_html=True)
     decision_tone = str(row.get("decision") or "neutral").lower()
-    eligibility.markdown(_metric_card("Elegibilidad", row.get("decision") or "—", decision_tone), unsafe_allow_html=True)
+    eligibility.markdown(_metric_card("Elegibilidad", _display_decision(row.get("decision")), decision_tone), unsafe_allow_html=True)
     hard_rejects = normalize_reason_list(reasons.get("hard_reject_reasons"))
     if hard_rejects:
         st.error("Motivo principal: " + hard_rejects[0])
@@ -116,14 +138,15 @@ def _render_job_detail(database: JobDatabase, row: dict, master_cv_path: str) ->
         info = st.columns(3)
         info[0].markdown(_metric_card("Publicada", _display_time(row.get("published_at")), compact=True), unsafe_allow_html=True)
         info[1].markdown(_metric_card("Detectada", _display_time(row.get("first_seen_at")), compact=True), unsafe_allow_html=True)
-        info[2].markdown(_metric_card("Estado", status.replace("_", " ").title(), "status", True), unsafe_allow_html=True)
+        info[2].markdown(_metric_card("Estado", _display_status(status), "status", True), unsafe_allow_html=True)
         _render_items("Motivos positivos", reasons.get("positive_reasons") or [])
-        if is_internal_job_url(str(row["url"])): st.info("Sin URL pública · vacante importada desde texto")
-        else: st.link_button("Abrir oferta original", row["url"])
-        actions = st.columns(2)
-        if row["decision"] in {"APPLY", "REVIEW"} and actions[0].button("⭐ Marcar para aplicar", key=f"short-{job_id}"):
+        st.markdown("#### Acciones")
+        actions = st.columns(3)
+        if is_internal_job_url(str(row["url"])): actions[0].caption("Sin URL pública · importada desde texto")
+        else: actions[0].link_button("Abrir oferta original", row["url"], type="secondary")
+        if row["decision"] in {"APPLY", "REVIEW"} and actions[1].button("⭐ Marcar para aplicar", key=f"short-{job_id}", type="primary"):
             database.set_application_status(job_id, "SHORTLISTED"); st.rerun()
-        if actions[1].button("⏭️ Descartar", key=f"skip-{job_id}"):
+        if actions[2].button("🗑️ Descartar", key=f"skip-{job_id}", type="secondary"):
             database.set_application_status(job_id, "SKIPPED"); st.rerun()
     with match_tab:
         cols = st.columns(3)
@@ -214,7 +237,7 @@ def _render_application_channel(database: JobDatabase, row: dict, master_cv_path
     pdf_valid = row.get("cv_pdf_status") == "PDF_VALID" and pdf_path.exists()
     st.write(f'CV PDF: {"✅ válido" if pdf_valid else "⏳ generar/validar primero"}')
     st.write(f'Email: **{row.get("email_draft_status") or "NOT_GENERATED"}**')
-    if row.get("application_email") and pdf_valid and st.button("Preparar email", key=f"prepare-email-{job_id}"):
+    if row.get("application_email") and pdf_valid and st.button("Preparar email", key=f"prepare-email-{job_id}", type="primary"):
         try: prepare_application_email(database.path, job_id, master_cv_path); st.rerun()
         except Exception as exc: st.error(str(exc))
     if row.get("email_draft_status") in {"GENERATED", "APPROVED", "GMAIL_DRAFT_CREATED"}:
@@ -224,14 +247,14 @@ def _render_application_channel(database: JobDatabase, row: dict, master_cv_path
             body = st.text_area("Cuerpo", row.get("email_body") or "", height=280)
             if st.form_submit_button("Guardar edición"):
                 database.save_email_draft(job_id, recipient, subject, body); st.rerun()
-    if row.get("email_draft_status") == "GENERATED" and st.button("Aprobar email", key=f"approve-email-{job_id}"):
+    if row.get("email_draft_status") == "GENERATED" and st.button("Aprobar email", key=f"approve-email-{job_id}", type="primary"):
         database.approve_email_draft(job_id); st.rerun()
     if row.get("email_draft_status") == "APPROVED" and pdf_valid:
         st.write(f'**Destinatario:** {row.get("application_email")}')
         st.write(f'**Asunto:** {row.get("email_subject")}')
         st.write(f'**Adjunto:** {pdf_path}')
         confirmed = st.checkbox("Confirmo crear este borrador en mi Gmail", key=f"confirm-gmail-{job_id}")
-        if st.button("Crear borrador en Gmail", disabled=not confirmed, key=f"gmail-draft-{job_id}"):
+        if st.button("Crear borrador en Gmail", disabled=not confirmed, key=f"gmail-draft-{job_id}", type="primary"):
             draft = EmailDraft(row["application_email"], row["email_subject"], row["email_body"], [str(pdf_path)])
             try: create_approved_gmail_draft(database, job_id, GmailEmailProvider(), draft); st.rerun()
             except Exception as exc: st.error(f"No se creó el borrador y el estado no cambió: {exc}")
@@ -407,38 +430,48 @@ with job_hunt_tab:
     selected_view = st.radio("Vista", list(view_labels), horizontal=True)
     rows = database.list_jobs(view_labels[selected_view], "All")
     filter_columns = st.columns(5)
-    selected_decision = filter_columns[0].selectbox("Decisión", ["All", "APPLY", "REVIEW", "REJECT"])
-    statuses = ["All", *sorted({str(row.get("application_status") or "NEW") for row in rows})]
-    selected_status = filter_columns[1].selectbox("Estado operativo", statuses)
-    selected_mode = filter_columns[2].selectbox("Modalidad", ["All", "Remote", "Hybrid", "Onsite", "Unknown"])
+    selected_decision = filter_columns[0].selectbox(
+        "Decisión", ["ALL", "APPLY", "REVIEW", "REJECT"],
+        format_func=lambda value: "Todas" if value == "ALL" else _display_decision(value),
+    )
+    statuses = ["ALL", "NEW", "SHORTLISTED", "CV_GENERATED", "APPROVED_TO_APPLY", "APPLIED", "SKIPPED"]
+    selected_status = filter_columns[1].selectbox(
+        "Estado operativo", statuses, format_func=lambda value: "Todos" if value == "ALL" else _display_status(value),
+    )
+    selected_mode = filter_columns[2].selectbox(
+        "Modalidad", ["ALL", "remote", "hybrid", "onsite", "unknown"],
+        format_func=lambda value: "Todas" if value == "ALL" else WORK_MODE_LABELS[value],
+    )
     sectors = ["All", *sorted({str(row.get("sector") or "Other") for row in rows})]
-    selected_sector = filter_columns[3].selectbox("Sector", sectors, key="job_sector")
-    channels = ["All", *sorted({str(row.get("application_method") or "UNKNOWN") for row in rows})]
-    selected_channel = filter_columns[4].selectbox("Canal", channels)
+    selected_sector = filter_columns[3].selectbox("Sector", sectors, key="job_sector",
+                                                   format_func=lambda value: "Todos" if value == "All" else value)
+    channels = ["ALL", "EMAIL", "LINK", "LINK_EMAIL", "UNKNOWN"]
+    selected_channel = filter_columns[4].selectbox(
+        "Canal", channels, format_func=lambda value: "Todos" if value == "ALL" else _display_method(value),
+    )
     rows = [row for row in rows
-            if (selected_decision == "All" or row.get("decision") == selected_decision)
-            and (selected_status == "All" or row.get("application_status") == selected_status)
-            and (selected_mode == "All" or _display_work_mode(row.get("work_mode"), row.get("description", "")) == selected_mode)
+            if (selected_decision == "ALL" or row.get("decision") == selected_decision)
+            and (selected_status == "ALL" or row.get("application_status") == selected_status)
+            and (selected_mode == "ALL" or normalize_work_mode(row.get("work_mode"), row.get("description", "")) == selected_mode)
             and (selected_sector == "All" or (row.get("sector") or "Other") == selected_sector)
-            and (selected_channel == "All" or (row.get("application_method") or "UNKNOWN") == selected_channel)]
+            and (selected_channel == "ALL" or (row.get("application_method") or "UNKNOWN") == selected_channel)]
     search = st.text_input("Buscar empresa o puesto", key="job_search").strip().casefold()
     rows = [row for row in rows if not search or search in str(row["company"]).casefold() or search in str(row["title"]).casefold()]
     if not rows:
         st.info("No hay ofertas en esta vista.")
     else:
-        decision_icons = {"APPLY": "✅ APPLY", "REVIEW": "🟡 REVIEW", "REJECT": "🔴 REJECT"}
-        method_icons = {"LINK": "🔗 LINK", "EMAIL": "✉️ EMAIL", "LINK_EMAIL": "🔗+✉️ LINK + EMAIL", "UNKNOWN": "❔ UNKNOWN"}
+        decision_icons = {"APPLY": "✅ Aplicar", "REVIEW": "🟡 Revisar", "REJECT": "🔴 Rechazar"}
+        method_icons = {"LINK": "🔗 Link", "EMAIL": "✉️ Email", "LINK_EMAIL": "🔗+✉️ Link + Email", "UNKNOWN": "❔ No detectado"}
         st.dataframe([{"Puesto": row["title"], "Empresa": row["company"],
-                       "Score": row["score"], "Decisión": decision_icons.get(row["decision"], row["decision"]),
-                       "Estado": str(row["application_status"]).replace("_", " ").title(),
+                       "Score": f'{float(row.get("score") or 0):.0f}%', "Decisión": decision_icons.get(row["decision"], _display_decision(row["decision"])),
+                       "Estado": _display_status(row["application_status"]),
                        "Modalidad": _display_work_mode(row["work_mode"], row["description"]),
-                       "Canal": method_icons.get(row.get("application_channel_used") or row.get("application_method"), "❔ UNKNOWN"),
+                       "Canal": method_icons.get(row.get("application_channel_used") or row.get("application_method"), "❔ No detectado"),
                        "Fecha": _display_time(row.get("published_at") or row["first_seen_at"])}
                       for row in rows], hide_index=True, width="stretch", height=min(460, 42 + len(rows) * 36),
                      column_config={"Puesto": st.column_config.TextColumn(width="large"),
-                                    "Empresa": st.column_config.TextColumn(width="medium"),
-                                    "Score": st.column_config.NumberColumn(format="%.0f")})
-        choices = {f'#{row["id"]} · {row["decision"]} · {row["company"]} · {row["title"]}': row for row in rows}
+                                    "Empresa": st.column_config.TextColumn(width="medium")})
+        choices = {f'#{row["id"]} · {_display_decision(row["decision"])} · {row["company"]} · {row["title"]}': row for row in rows}
         choice_labels = list(choices)
         focus_id = st.session_state.get("import_focus_job_id")
         focus_index = next((index for index, row in enumerate(rows) if row["id"] == focus_id), 0)

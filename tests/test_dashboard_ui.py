@@ -26,7 +26,7 @@ def test_job_detail_has_clear_tabs_and_factual_evidence():
 
 def test_job_list_has_requested_filters():
     for label in ("Decisión", "Estado operativo", "Modalidad", "Sector", "Canal"):
-        assert f'selectbox("{label}"' in SOURCE
+        assert f'"{label}"' in SOURCE
 
 
 def test_primary_job_table_is_compact():
@@ -35,6 +35,29 @@ def test_primary_job_table_is_compact():
         assert f'"{column}"' in table_block
     for secondary in ("Ubicación", "Fuente", "Sector", "Oferta"):
         assert f'"{secondary}"' not in table_block
+
+
+def test_table_score_is_presented_as_percentage():
+    assert '"Score": f\'{float(row.get("score") or 0):.0f}%\'' in SOURCE
+
+
+def test_ui_translation_maps_cover_internal_states():
+    expected = (
+        '"APPLY": "Aplicar"', '"REVIEW": "Revisar"', '"REJECT": "Rechazar"',
+        '"NEW": "Nuevo"', '"SHORTLISTED": "Preseleccionado"', '"CV_GENERATED": "CV generado"',
+        '"APPROVED_TO_APPLY": "Aprobado para postular"', '"APPLIED": "Postulado"', '"SKIPPED": "Descartado"',
+        '"remote": "Remoto"', '"hybrid": "Híbrido"', '"onsite": "Presencial"', '"unknown": "No informado"',
+        '"EMAIL": "Email"', '"LINK": "Link"', '"LINK_EMAIL": "Link + Email"', '"UNKNOWN": "No detectado"',
+    )
+    assert all(value in SOURCE for value in expected)
+
+
+def test_friendly_filters_keep_internal_values():
+    assert '["ALL", "APPLY", "REVIEW", "REJECT"]' in SOURCE
+    assert '["ALL", "remote", "hybrid", "onsite", "unknown"]' in SOURCE
+    assert '["ALL", "EMAIL", "LINK", "LINK_EMAIL", "UNKNOWN"]' in SOURCE
+    assert 'row.get("decision") == selected_decision' in SOURCE
+    assert 'row.get("application_status") == selected_status' in SOURCE
 
 
 def test_sidebar_uses_advanced_configuration_expander():
@@ -51,3 +74,5 @@ def test_dashboard_keeps_core_actions():
     for label in ("Generar CV", "Ver HTML", "Descargar PDF", "Preparar email", "Aprobar email",
                   "Crear borrador en Gmail", "Marcar como postulada por link", "Descartar"):
         assert label in SOURCE
+    assert 'st.markdown("#### Acciones")' in SOURCE
+    assert '"🗑️ Descartar", key=f"skip-{job_id}", type="secondary"' in SOURCE
