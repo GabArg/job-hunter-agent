@@ -190,7 +190,9 @@ with job_hunt_tab:
     view_labels = {"Nuevas hoy": "today", "Recomendadas": "recommended", "En revisión": "review",
                    "CVs generados": "cvs", "Postuladas": "applied", "Descartadas": "discarded"}
     selected_view = st.radio("Vista", list(view_labels), horizontal=True)
-    rows = database.list_jobs(view_labels[selected_view])
+    sectors = ["All", "Fintech", "Banking", "Retail", "E-commerce", "Consulting", "Technology", "SaaS", "Logistics", "Telecom", "Other"]
+    selected_sector = st.selectbox("Sector", sectors, key="job_sector")
+    rows = database.list_jobs(view_labels[selected_view], selected_sector)
     search = st.text_input("Buscar empresa o puesto", key="job_search").strip().casefold()
     rows = [row for row in rows if not search or search in str(row["company"]).casefold() or search in str(row["title"]).casefold()]
     if not rows:
@@ -198,6 +200,7 @@ with job_hunt_tab:
     else:
         st.dataframe([{"ID": row["id"], "Decisión": row["decision"], "Score": row["score"],
                        "Estado": row["application_status"], "Empresa": row["company"], "Puesto": row["title"],
+                       "Sector": row.get("sector") or "Other", "Nueva <72h": "🆕" if row.get("priority_fresh") else "",
                        "Modalidad": row["work_mode"], "Método": row.get("application_channel_used") or row.get("application_method"),
                        "Destinatario": row.get("application_email") or "", "Aplicada": _display_time(row.get("applied_at")),
                        "Detectada": _display_time(row["first_seen_at"]), "Oferta": row["url"]}
@@ -251,3 +254,17 @@ with system_tab:
                        "APPLY": run["apply_count"], "REVIEW": run["review_count"], "REJECT": run["reject_count"],
                        "Errores": run["errors"]} for run in runs], hide_index=True, use_container_width=True)
     else: st.info("Aún no hay ejecuciones registradas.")
+    st.subheader("Source Intelligence")
+    metric_sectors = ["All", "Fintech", "Banking", "Retail", "E-commerce", "Consulting", "Technology", "SaaS", "Logistics", "Telecom", "Other"]
+    metric_sector = st.selectbox("Filtrar métricas por sector", metric_sectors)
+    intelligence = database.source_intelligence(metric_sector)
+    if intelligence:
+        st.dataframe([{"Fuente": row["source"], "Target": row["target"], "Sector": row["sector"],
+                       "Fetched": row["fetched"], "Relevant": row["relevant"], "APPLY": row["apply_count"],
+                       "REVIEW": row["review_count"], "REJECT": row["reject_count"],
+                       "Duplicates": row["duplicates"], "Errors": row["errors"],
+                       "Quality Score": row["quality_score"], "Health": row["health"],
+                       "Última ejecución": _display_time(row["last_run"])} for row in intelligence],
+                     hide_index=True, use_container_width=True)
+    else:
+        st.info("Todavía no hay métricas por fuente/target.")

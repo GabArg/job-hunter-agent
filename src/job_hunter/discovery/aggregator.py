@@ -3,13 +3,16 @@ from __future__ import annotations
 import html
 import logging
 import re
+import hashlib
+from time import perf_counter
 from dataclasses import dataclass, field
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from ..models import Job
 from ..normalizer import clean_text
 from .base import JobSource
-from .matching import geography_compatible, is_fresh, title_matches
+from .matching import description_relevant, geography_compatible, is_fresh, is_priority_fresh, title_matches
+from .target_registry import detect_sector
 from .models import RawJob
 
 logger = logging.getLogger(__name__)
@@ -20,10 +23,18 @@ TRACKING_PARAMETERS = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "
 class SourceStats:
     fetched: int = 0
     relevant_by_title: int = 0
+    relevant_after_description: int = 0
     rejected_pre_score: int = 0
     scored: int = 0
     duplicates: int = 0
     error: str | None = None
+    latency_ms: int = 0
+    target: str | None = None
+    sector: str = "Other"
+    apply_count: int = 0
+    review_count: int = 0
+    reject_count: int = 0
+    fresh_count: int = 0
 
     @property
     def found(self) -> int: return self.fetched
@@ -60,13 +71,17 @@ class DiscoveryAggregator:
         limit: int | None = None,
         preferred_locations: list[str] | None = None,
         max_age_days: int | None = 14,
+        priority_fresh_days: int = 3,
     ) -> DiscoveryResult:
         query_list = [queries] if isinstance(queries, str) else queries
         result = DiscoveryResult(stats={source.name: SourceStats() for source in self.sources})
         seen_urls: set[str] = set()
-        seen_content: set[tuple[str, str, str]] = set()
+        seen_fingerprints: set[str] = set()
         for source in self.sources:
             stat = result.stats[source.name]
+            stat.target = getattr(source, "target_id", source.name)
+            stat.sector = getattr(source, "sector", "Other")
+            started = perf_counter()
             try:
                 source_jobs: list[RawJob] = []
                 for query in query_list:
@@ -80,24 +95,37 @@ class DiscoveryAggregator:
                         stat.rejected_pre_score += 1
                         continue
                     stat.relevant_by_title += 1
+                    if not description_relevant(raw.title, raw.description):
+                        stat.rejected_pre_score += 1
+                        continue
+                    stat.relevant_after_description += 1
                     geography_ok, _ = geography_compatible(raw, preferred_locations or [])
                     if not geography_ok or not is_fresh(raw.published_at, max_age_days):
                         stat.rejected_pre_score += 1
                         continue
                     job = raw_to_job(raw)
+                    configured_sector = getattr(source, "sector", "Other")
+                    if configured_sector and configured_sector != "Other":
+                        job.sector, job.sector_confidence = configured_sector, float(getattr(source, "sector_confidence", 1.0))
+                    else:
+                        job.sector, job.sector_confidence = detect_sector(job.company, job.description)
+                    job.priority_fresh = is_priority_fresh(job.published_at, priority_fresh_days)
                     url_key = canonical_url(job.url)
-                    content_key = (clean_text(job.company), clean_text(job.title), clean_text(job.location))
-                    if (url_key and url_key in seen_urls) or content_key in seen_content:
+                    fingerprint = job_fingerprint(job)
+                    if (url_key and url_key in seen_urls) or fingerprint in seen_fingerprints:
                         stat.duplicates += 1
                         continue
                     if url_key:
                         seen_urls.add(url_key)
-                    seen_content.add(content_key)
+                    seen_fingerprints.add(fingerprint)
                     result.jobs.append(job)
                     stat.scored += 1
+                    stat.fresh_count += int(job.priority_fresh)
             except Exception as exc:  # A failed source must not stop discovery.
                 logger.warning("Discovery source %s failed: %s", source.name, exc)
                 stat.error = f"{type(exc).__name__}: {exc}"
+            finally:
+                stat.latency_ms = round((perf_counter() - started) * 1000)
         return result
 
 
@@ -121,6 +149,12 @@ def canonical_url(url: str) -> str:
     parts = urlsplit(url.strip())
     query = urlencode([(key, value) for key, value in parse_qsl(parts.query) if key.lower() not in TRACKING_PARAMETERS])
     return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), query, ""))
+
+
+def job_fingerprint(job: Job) -> str:
+    # The description prevents false merges for distinct openings sharing title/location.
+    value = "|".join(clean_text(part) for part in (job.company, job.title, job.location, job.description))
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _plain_text(value: str) -> str:

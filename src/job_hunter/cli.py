@@ -34,6 +34,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     discover.add_argument("--profile", default="config/profile.yaml", help="YAML profile path")
     discover.add_argument("--database", default="data/jobs.db", help="SQLite database path")
+    report = subparsers.add_parser("discovery-report", help="Report source/target coverage and quality")
+    report.add_argument("--profile", default="config/profile.yaml")
+    report.add_argument("--database", default="data/jobs.db")
+    report.add_argument("--sector")
     cv = subparsers.add_parser("cv", help="Generate a factually validated tailored CV")
     target = cv.add_mutually_exclusive_group(required=True)
     target.add_argument("--job-id", type=int, help="Stored job ID")
@@ -96,9 +100,27 @@ def main() -> None:
             status = f"ERROR {stat.error}" if stat.error else "OK"
             print(
                 f"{name}: fetched={stat.fetched} title_relevant={stat.relevant_by_title} "
-                f"pre_score_rejected={stat.rejected_pre_score} scored={stat.scored} "
-                f"duplicates={stat.duplicates} status={status}"
+                f"description_relevant={stat.relevant_after_description} pre_score_rejected={stat.rejected_pre_score} "
+                f"scored={stat.scored} APPLY={stat.apply_count} REVIEW={stat.review_count} REJECT={stat.reject_count} "
+                f"duplicates={stat.duplicates} latency_ms={stat.latency_ms} status={status}"
             )
+    elif args.command == "discovery-report":
+        from .discovery.target_registry import TargetRegistry
+        profile = load_profile(args.profile); database = JobDatabase(args.database)
+        registry = TargetRegistry.from_mapping({"discovery_targets": profile.discovery_targets,
+                                                "career_pages": profile.career_pages,
+                                                "career_targets": profile.career_targets})
+        report = database.discovery_report()
+        intelligence = database.source_intelligence(args.sector)
+        print(f"Targets activos: {len(registry.active)} / {len(registry.targets)}")
+        print("Por ATS: " + ", ".join(f"{k}={v}" for k, v in sorted(registry.counts_by_source().items())))
+        print("Por sector: " + ", ".join(f"{k}={v}" for k, v in sorted(registry.counts_by_sector().items())))
+        print(f"Jobs últimos 7 días: {report['jobs_last_7_days']} | decisiones={report['decisions']}")
+        for row in intelligence:
+            print(f"{row['source']} | {row['target']} | {row['sector']} | {row['health']} | "
+                  f"fetched={row['fetched']} relevant={row['relevant']} APPLY={row['apply_count']} "
+                  f"REVIEW={row['review_count']} REJECT={row['reject_count']} quality={row['quality_score']}")
+        return
     elif args.command == "cv":
         job = JobDatabase(args.database).get_job(args.job_id, args.url)
         if job is None:

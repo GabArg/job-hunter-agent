@@ -8,6 +8,7 @@ from .sources import (
     ArbeitnowSource, AshbySource, GenericCareersSource, GreenhouseSource,
     LeverSource, RemoteOKSource, WorkableSource,
 )
+from .target_registry import TargetRegistry
 
 ATS_FACTORIES = {
     "greenhouse": GreenhouseSource,
@@ -23,21 +24,20 @@ def build_sources(profile: Profile, selected: list[str] | None = None) -> list[J
     sources: list[JobSource] = []
     if include_all or "remoteok" in selected_set: sources.append(RemoteOKSource())
     if include_all or "arbeitnow" in selected_set: sources.append(ArbeitnowSource())
-    for target in profile.career_targets:
-        company = str(target.get("company") or "").strip()
-        ats = str(target.get("ats") or _infer_ats(str(target.get("careers_url") or ""))).lower()
-        if not company:
-            raise ValueError("Every career target requires company")
+    mapping = {"discovery_targets": profile.discovery_targets, "career_pages": profile.career_pages, "career_targets": profile.career_targets}
+    for target in TargetRegistry.from_mapping(mapping).active:
+        company, ats = target.company, target.source_type
+        if not company: raise ValueError("Every discovery target requires company")
         if not include_all and ats not in selected_set: continue
         if ats in ATS_FACTORIES:
-            token = str(target.get("board_token") or _token_from_url(str(target.get("careers_url") or ""))).strip()
-            if not token: raise ValueError(f"Career target {company} requires board_token")
-            sources.append(ATS_FACTORIES[ats](company, token))
-        elif ats in {"generic", "careers"}:
-            url = str(target.get("careers_url") or "")
-            sources.append(GenericCareersSource(f"careers:{company}", url, fetcher=fetch_text))
+            token = target.token or _token_from_url(target.url)
+            if not token: raise ValueError(f"Discovery target {company} requires token/account")
+            source = ATS_FACTORIES[ats](company, token)
         else:
-            raise ValueError(f"Unsupported ATS '{ats}' for {company}")
+            source = GenericCareersSource(f"careers:{company}", target.url, fetcher=fetch_text)
+        source.sector, source.sector_confidence = target.sector, 1.0
+        source.target_priority, source.target_id = target.priority, target.id
+        sources.append(source)
     return sources
 
 

@@ -29,6 +29,10 @@ def score_job(job: Job, profile: Profile) -> ScoreResult:
         earned += weights.get("location", 0); positive.append("Ubicación preferida")
     if job.work_mode in profile.preferred_work_modes:
         earned += weights.get("work_mode", 0); positive.append("Modalidad preferida")
+    if any(company.casefold() == job.company.casefold() for company in profile.preferred_companies):
+        # Deliberately small: preference improves ordering but cannot justify APPLY alone.
+        earned += min(2.0, weights.get("role", 0) * 0.07)
+        positive.append("Empresa preferida")
     if job.seniority is None or job.seniority in profile.allowed_seniority:
         earned += weights.get("seniority", 0); positive.append("Senioridad compatible")
 

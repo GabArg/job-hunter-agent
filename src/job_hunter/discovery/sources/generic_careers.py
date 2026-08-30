@@ -84,18 +84,22 @@ def _json_ld_jobs(document: str) -> list[dict[str, Any]]:
             continue
         entries = value if isinstance(value, list) else value.get("@graph", [value])
         for entry in entries:
-            if not isinstance(entry, dict) or entry.get("@type") != "JobPosting":
+            entry_types = entry.get("@type", []) if isinstance(entry, dict) else []
+            if isinstance(entry_types, str): entry_types = [entry_types]
+            if not isinstance(entry, dict) or "JobPosting" not in entry_types:
                 continue
             location = entry.get("jobLocation") or {}
             if isinstance(location, list): location = location[0] if location else {}
             address = location.get("address", {}) if isinstance(location, dict) else {}
             org = entry.get("hiringOrganization") or {}
+            identifier = entry.get("identifier")
+            if isinstance(identifier, dict): identifier = identifier.get("value") or identifier.get("name")
             results.append({
-                "id": entry.get("identifier", {}).get("value") if isinstance(entry.get("identifier"), dict) else entry.get("identifier"),
+                "id": identifier,
                 "title": entry.get("title"), "description": entry.get("description"),
                 "company": org.get("name") if isinstance(org, dict) else org,
                 "location": ", ".join(str(address.get(key)) for key in ("addressLocality", "addressRegion", "addressCountry") if address.get(key)),
                 "work_mode": "remote" if entry.get("jobLocationType") == "TELECOMMUTE" else "onsite",
-                "url": entry.get("url"), "published_at": entry.get("datePosted"),
+                "url": entry.get("url") or entry.get("sameAs"), "published_at": entry.get("datePosted"),
             })
     return results

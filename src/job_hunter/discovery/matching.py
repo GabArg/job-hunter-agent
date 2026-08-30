@@ -59,6 +59,37 @@ def is_fresh(published_at: str | None, max_age_days: int | None, now: datetime |
     return published >= reference - timedelta(days=max_age_days)
 
 
+def is_priority_fresh(published_at: str | None, days: int = 3, now: datetime | None = None) -> bool:
+    if not published_at:
+        return False
+    published = parse_datetime(published_at)
+    if published is None:
+        return False
+    return published >= (now or datetime.now(timezone.utc)) - timedelta(days=days)
+
+
+ANALYTIC_COMMERCIAL_SIGNALS = (
+    "analisis", "analytics", "datos", "data", "kpi", "pricing", "precios", "margen",
+    "rentabilidad", "reporting", "reporte", "forecast", "excel", "power bi", "bi ",
+    "performance", "costos", "costes",
+)
+SALES_COMMERCIAL_SIGNALS = (
+    "venta directa", "captacion", "prospeccion", "comision", "cartera comercial",
+    "ejecutivo comercial", "vendedor", "cumplimiento de cuota", "cold call",
+)
+
+
+def description_relevant(title: str, description: str) -> bool:
+    """Reject sales-heavy commercial roles while retaining analytical commercial roles."""
+    title_text, body = normalized(title), normalized(description)
+    commercial = any(term in title_text for term in ("analista comercial", "commercial analyst"))
+    if not commercial:
+        return True
+    analytic = sum(signal in body for signal in ANALYTIC_COMMERCIAL_SIGNALS)
+    sales = sum(signal in body for signal in SALES_COMMERCIAL_SIGNALS)
+    return analytic >= 1 and analytic >= sales
+
+
 def parse_datetime(value: str | int | float | None) -> datetime | None:
     if value in (None, ""):
         return None

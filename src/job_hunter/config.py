@@ -50,6 +50,10 @@ def load_profile(path: str | Path) -> Profile:
         hard_reject_rules={str(k): bool(v) for k, v in data["hard_reject_rules"].items()},
         scoring_weights=weights,
         discovery_schedule=dict(data.get("discovery_schedule") or {"enabled": True, "times": ["08:00", "18:00"]}),
+        discovery_targets={str(key): [dict(value) for value in values or []] for key, values in (data.get("discovery_targets") or {}).items()},
+        career_pages=[dict(value) for value in data.get("career_pages") or []],
+        preferred_companies=_normalized_list(data.get("preferred_companies") or []),
+        priority_fresh_days=int(data.get("priority_fresh_days", 3)),
     )
 
 

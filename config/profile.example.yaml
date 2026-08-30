@@ -9,26 +9,36 @@ search_queries:
   - Commercial Analyst
   - Analytics Analyst
 query_groups:
-  analytics:
+  data:
     - Data Analyst
+    - Analista de Datos
     - BI Analyst
     - Business Intelligence Analyst
-    - Analista de Datos
-    - Analista BI
+    - Reporting Analyst
+    - Analista de Reporting
   business:
     - Business Analyst
     - Analista de Negocios
-    - Commercial Analyst
     - Analista Comercial
+    - Commercial Analyst
+    - Business Performance Analyst
   operations:
     - Operations Analyst
-    - Sales Operations Analyst
-    - Performance Analyst
+    - Analista de Operaciones
+    - Process Analyst
+    - Analista de Procesos
+    - Operational Excellence Analyst
   pricing:
     - Pricing Analyst
     - Analista de Pricing
+    - Analista de Precios
     - Revenue Analyst
-    - Marketplace Analyst
+    - Margin Analyst
+  customer:
+    - Customer Analytics
+    - Customer Insights Analyst
+    - CRM Analyst
+    - Analista de Clientes
 
 # Targets opcionales. No incluir credenciales; sólo boards/career pages públicas.
 # career_targets:
@@ -41,6 +51,91 @@ query_groups:
 #     board_token: example
 #     careers_url: https://jobs.lever.co/example
 career_targets: []
+discovery_targets:
+  lever:
+    - company: dLocal
+      board_token: dlocal
+      sectors: [Fintech, Payments]
+      priority: high
+  ashby:
+    - company: ARQ
+      board_token: arq
+      sectors: [Fintech]
+      priority: high
+    - company: Koyfin
+      board_token: Koyfin
+      sectors: [Fintech, SaaS]
+      priority: high
+    - company: Paymentology
+      board_token: paymentology
+      sectors: [Fintech, Payments]
+      priority: high
+    - company: Taptap Send
+      board_token: TaptapSend
+      sectors: [Fintech, Payments]
+      priority: high
+  workable:
+    - company: Qodea
+      account: qodea
+      sectors: [Consulting, Technology]
+      priority: normal
+  manual_source_candidate:
+    - company: Mercado Libre
+      sector: E-commerce
+      enabled: false
+      notes: No se confirmó un endpoint ATS público compatible y estable.
+    - company: Ualá
+      sector: Fintech
+      enabled: false
+      notes: Candidato manual; no consultar hasta verificar endpoint público.
+    - company: Santander
+      sector: Banking
+      enabled: false
+      notes: Candidato manual; no consultar hasta verificar endpoint público.
+    - {company: Naranja X, sector: Fintech, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Brubank, sector: Fintech, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Pomelo, sector: Fintech, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: MODO, sector: Fintech, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: BBVA, sector: Banking, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Galicia, sector: Banking, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Banco Macro, sector: Banking, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Supervielle, sector: Banking, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Getnet, sector: Fintech, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Payway, sector: Fintech, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Kushki, sector: Fintech, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: SumUp, sector: Fintech, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: PayU, sector: Fintech, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Tiendanube, sector: E-commerce, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Accenture, sector: Consulting, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Globant, sector: Technology, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Endava, sector: Technology, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: EPAM, sector: Technology, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Thoughtworks, sector: Consulting, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Baufest, sector: Technology, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: KPMG, sector: Consulting, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: EY, sector: Consulting, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: PwC, sector: Consulting, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Deloitte, sector: Consulting, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Cencosud, sector: Retail, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Carrefour, sector: Retail, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: PedidosYa, sector: E-commerce, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Despegar, sector: E-commerce, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Unilever, sector: Retail, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Nestlé, sector: Retail, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Andreani, sector: Logistics, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: OCASA, sector: Logistics, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: DHL, sector: Logistics, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Telecom, sector: Telecom, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Movistar, sector: Telecom, enabled: false, notes: Endpoint público compatible no confirmado.}
+    - {company: Claro, sector: Telecom, enabled: false, notes: Endpoint público compatible no confirmado.}
+career_pages: []
+preferred_companies:
+  - Mercado Libre
+  - Ualá
+  - Naranja X
+  - Banco Galicia
+  - Santander
+priority_fresh_days: 3
 target_roles:
   - pricing analyst
   - business analyst

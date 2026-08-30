@@ -11,6 +11,7 @@ from .discovery.base import JobSource
 from .models import Job
 from .normalizer import normalize_job
 from .scorer import score_job
+from .discovery.target_registry import quality_score
 
 REQUIRED_COLUMNS = {"title", "company", "location", "work_mode", "description", "source", "url"}
 
@@ -56,6 +57,7 @@ def run_discovery_pipeline(
             queries or _profile_aliases(profile), location=location, limit=limit,
             preferred_locations=[location] if location else profile.preferred_locations,
             max_age_days=max_age_days,
+            priority_fresh_days=profile.priority_fresh_days,
         )
         processed = process_jobs(discovery.jobs, profile_path, database_path)
         counts = {decision: sum(job.decision == decision for job in processed.jobs) for decision in ("APPLY", "REVIEW", "REJECT")}
@@ -66,6 +68,27 @@ def run_discovery_pipeline(
             apply_count=counts["APPLY"], review_count=counts["REVIEW"], reject_count=counts["REJECT"],
             errors=discovery.errors,
         )
+        for source_name, stat in discovery.stats.items():
+            source_jobs = [job for job in processed.jobs if job.source.casefold() == source_name.casefold()]
+            if stat.sector == "Other" and source_jobs:
+                sector_counts = {sector: sum(job.sector == sector for job in source_jobs)
+                                 for sector in {job.sector for job in source_jobs}}
+                stat.sector = max(sector_counts, key=sector_counts.get)
+            stat.apply_count = sum(job.decision == "APPLY" for job in source_jobs)
+            stat.review_count = sum(job.decision == "REVIEW" for job in source_jobs)
+            stat.reject_count = sum(job.decision == "REJECT" for job in source_jobs)
+            database.record_source_metric(
+                run_id=run_id, source=source_name, target=stat.target, sector=stat.sector,
+                fetched=stat.fetched, relevant_by_title=stat.relevant_by_title,
+                relevant_after_description=stat.relevant_after_description,
+                pre_score_rejected=stat.rejected_pre_score, scored=stat.scored,
+                apply_count=stat.apply_count, review_count=stat.review_count, reject_count=stat.reject_count,
+                duplicates=stat.duplicates, error=stat.error, latency_ms=stat.latency_ms,
+                fresh_count=stat.fresh_count,
+                quality_score=quality_score(stat.fetched, stat.relevant_after_description,
+                                            stat.apply_count, stat.review_count, stat.duplicates,
+                                            int(bool(stat.error)), stat.fresh_count),
+            )
     except Exception as exc:
         database.finish_discovery_run(run_id, status="FAILED", errors={"pipeline": f"{type(exc).__name__}: {exc}"})
         raise

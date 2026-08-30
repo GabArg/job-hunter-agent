@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,17 @@ CREATE TABLE IF NOT EXISTS discovery_runs (
     errors TEXT NOT NULL DEFAULT '{}'
 )
 """
+SOURCE_METRICS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS source_metrics (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, source TEXT NOT NULL, target TEXT,
+ sector TEXT NOT NULL DEFAULT 'Other', recorded_at TEXT NOT NULL, fetched INTEGER DEFAULT 0,
+ relevant_by_title INTEGER DEFAULT 0, relevant_after_description INTEGER DEFAULT 0,
+ pre_score_rejected INTEGER DEFAULT 0, scored INTEGER DEFAULT 0, apply_count INTEGER DEFAULT 0,
+ review_count INTEGER DEFAULT 0, reject_count INTEGER DEFAULT 0, duplicates INTEGER DEFAULT 0,
+ errors INTEGER DEFAULT 0, error_message TEXT, latency_ms INTEGER DEFAULT 0, fresh_count INTEGER DEFAULT 0,
+ quality_score REAL DEFAULT 0, consecutive_failures INTEGER DEFAULT 0, health TEXT DEFAULT 'HEALTHY'
+)
+"""
 
 
 def utc_now() -> str:
@@ -48,12 +60,19 @@ class JobDatabase:
     def __init__(self, path: str | Path):
         self.path = Path(path); self.path.parent.mkdir(parents=True, exist_ok=True); self._initialize()
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path); connection.row_factory = sqlite3.Row; return connection
+    @contextmanager
+    def _connect(self):
+        connection = sqlite3.connect(self.path)
+        connection.row_factory = sqlite3.Row
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def _initialize(self) -> None:
         with self._connect() as connection:
-            connection.execute(JOBS_SCHEMA); connection.execute(RUNS_SCHEMA)
+            connection.execute(JOBS_SCHEMA); connection.execute(RUNS_SCHEMA); connection.execute(SOURCE_METRICS_SCHEMA)
             columns = {row[1] for row in connection.execute("PRAGMA table_info(jobs)")}
             migrations = {
                 "published_at": "TEXT", "discovered_at": "TEXT", "application_status": "TEXT NOT NULL DEFAULT 'NEW'",
@@ -64,6 +83,8 @@ class JobDatabase:
                 "email_subject": "TEXT", "email_body": "TEXT",
                 "email_draft_status": "TEXT NOT NULL DEFAULT 'NOT_GENERATED'", "email_sent_at": "TEXT",
                 "email_message_id": "TEXT", "selected_application_channel": "TEXT", "application_channel_used": "TEXT",
+                "sector": "TEXT NOT NULL DEFAULT 'Other'", "sector_confidence": "REAL NOT NULL DEFAULT 0",
+                "priority_fresh": "INTEGER NOT NULL DEFAULT 0",
             }
             for name, definition in migrations.items():
                 if name not in columns: connection.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
@@ -94,14 +115,16 @@ class JobDatabase:
         values = (job.title, job.company, job.location, job.work_mode, job.description, job.source, job.url,
                   job.published_at, seen_at, job.score, job.decision, json.dumps(job.reasons, ensure_ascii=False),
                   job.created_at, seen_at, seen_at, seen_at, job.application_method, job.application_email,
-                  job.application_url, json.dumps(job.application_instructions, ensure_ascii=False), job.email_subject)
+                  job.application_url, json.dumps(job.application_instructions, ensure_ascii=False), job.email_subject,
+                  job.sector, job.sector_confidence, int(job.priority_fresh))
         with self._connect() as connection:
             existed = connection.execute("SELECT 1 FROM jobs WHERE url = ?", (job.url,)).fetchone()
             connection.execute("""
                 INSERT INTO jobs (title, company, location, work_mode, description, source, url, published_at,
                     discovered_at, score, decision, reasons, created_at, first_seen_at, last_seen_at, last_scored_at,
-                    application_method, application_email, application_url, application_instructions, email_subject)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    application_method, application_email, application_url, application_instructions, email_subject,
+                    sector, sector_confidence, priority_fresh)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(url) DO UPDATE SET
                     title=excluded.title, company=excluded.company, location=excluded.location,
                     work_mode=excluded.work_mode, description=excluded.description, source=excluded.source,
@@ -110,11 +133,13 @@ class JobDatabase:
                     last_scored_at=excluded.last_scored_at, application_method=excluded.application_method,
                     application_email=excluded.application_email, application_url=excluded.application_url,
                     application_instructions=excluded.application_instructions,
-                    email_subject=CASE WHEN jobs.email_draft_status='NOT_GENERATED' THEN excluded.email_subject ELSE jobs.email_subject END
+                    email_subject=CASE WHEN jobs.email_draft_status='NOT_GENERATED' THEN excluded.email_subject ELSE jobs.email_subject END,
+                    sector=excluded.sector,sector_confidence=excluded.sector_confidence,
+                    priority_fresh=excluded.priority_fresh
             """, values)
         return existed is None
 
-    def list_jobs(self, view: str | None = None) -> list[dict[str, Any]]:
+    def list_jobs(self, view: str | None = None, sector: str | None = None) -> list[dict[str, Any]]:
         clauses = {
             "today": "date(first_seen_at, 'localtime') = date('now', 'localtime')",
             "recommended": "decision = 'APPLY' AND application_status NOT IN ('APPLIED','SKIPPED')",
@@ -123,11 +148,14 @@ class JobDatabase:
             "applied": "application_status = 'APPLIED'",
             "discarded": "decision = 'REJECT' OR application_status = 'SKIPPED'",
         }
-        where = f"WHERE {clauses[view]}" if view in clauses else ""
+        conditions = [clauses[view]] if view in clauses else []
+        values: list[Any] = []
+        if sector and sector != "All": conditions.append("sector = ?"); values.append(sector)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         with self._connect() as connection:
             rows = connection.execute(f"""SELECT * FROM jobs {where} ORDER BY
                 CASE decision WHEN 'APPLY' THEN 0 WHEN 'REVIEW' THEN 1 ELSE 2 END,
-                score DESC, COALESCE(published_at, '') DESC, id DESC""").fetchall()
+                priority_fresh DESC, score DESC, COALESCE(published_at, '') DESC, id DESC""", values).fetchall()
         return [dict(row) for row in rows]
 
     def get_job_row(self, job_id: int) -> dict[str, Any] | None:
@@ -149,7 +177,8 @@ class JobDatabase:
                    email_subject=data.get("email_subject"), email_body=data.get("email_body"),
                    email_draft_status=data.get("email_draft_status") or "NOT_GENERATED", email_sent_at=data.get("email_sent_at"),
                    email_message_id=data.get("email_message_id"), selected_application_channel=data.get("selected_application_channel"),
-                   application_channel_used=data.get("application_channel_used"))
+                   application_channel_used=data.get("application_channel_used"), sector=data.get("sector") or "Other",
+                   sector_confidence=float(data.get("sector_confidence") or 0), priority_fresh=bool(data.get("priority_fresh")))
 
     def select_application_channel(self, job_id: int, channel: str) -> None:
         if channel not in {"LINK", "EMAIL"}: raise ValueError("Channel must be LINK or EMAIL")
@@ -242,3 +271,40 @@ class JobDatabase:
         with self._connect() as connection:
             row = connection.execute("SELECT COUNT(*) count FROM jobs WHERE first_seen_at >= ?", (latest["started_at"],)).fetchone()
         return int(row["count"])
+
+    def record_source_metric(self, *, run_id: int | None, source: str, target: str | None, sector: str,
+                             fetched: int, relevant_by_title: int, relevant_after_description: int,
+                             pre_score_rejected: int, scored: int, apply_count: int, review_count: int,
+                             reject_count: int, duplicates: int, error: str | None, latency_ms: int,
+                             fresh_count: int, quality_score: float) -> None:
+        with self._connect() as connection:
+            previous = connection.execute("SELECT consecutive_failures FROM source_metrics WHERE source=? ORDER BY id DESC LIMIT 1", (source,)).fetchone()
+            failures = (int(previous[0]) + 1 if previous else 1) if error else 0
+            health = "DEGRADED" if failures >= 3 else "HEALTHY"
+            connection.execute("""INSERT INTO source_metrics (run_id,source,target,sector,recorded_at,fetched,
+                relevant_by_title,relevant_after_description,pre_score_rejected,scored,apply_count,review_count,
+                reject_count,duplicates,errors,error_message,latency_ms,fresh_count,quality_score,consecutive_failures,health)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (run_id,source,target,sector,utc_now(),fetched,relevant_by_title,relevant_after_description,
+                 pre_score_rejected,scored,apply_count,review_count,reject_count,duplicates,int(bool(error)),error,
+                 latency_ms,fresh_count,quality_score,failures,health))
+
+    def source_intelligence(self, sector: str | None = None) -> list[dict[str, Any]]:
+        condition, values = ("WHERE sector=?", [sector]) if sector and sector != "All" else ("", [])
+        query = f"""SELECT source,target,sector,SUM(fetched) fetched,SUM(relevant_after_description) relevant,
+            SUM(apply_count) apply_count,SUM(review_count) review_count,SUM(reject_count) reject_count,
+            SUM(duplicates) duplicates,SUM(errors) errors,ROUND(AVG(quality_score),2) quality_score,
+            MAX(recorded_at) last_run,
+            (SELECT health FROM source_metrics recent WHERE recent.source=source_metrics.source ORDER BY id DESC LIMIT 1) health
+            FROM source_metrics {condition} GROUP BY source,target,sector ORDER BY quality_score DESC"""
+        with self._connect() as connection: rows = connection.execute(query, values).fetchall()
+        return [dict(row) for row in rows]
+
+    def discovery_report(self) -> dict[str, Any]:
+        intelligence = self.source_intelligence(); week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat(timespec="seconds")
+        with self._connect() as connection:
+            decisions = connection.execute("SELECT decision,COUNT(*) count FROM jobs WHERE first_seen_at>=? GROUP BY decision", (week_ago,)).fetchall()
+        return {"sources": intelligence, "jobs_last_7_days": sum(row["count"] for row in decisions),
+                "decisions": {row["decision"]: row["count"] for row in decisions},
+                "targets_without_results": [row["target"] for row in intelligence if row["fetched"] == 0],
+                "frequent_errors": [row["source"] for row in intelligence if row["errors"] > 0]}

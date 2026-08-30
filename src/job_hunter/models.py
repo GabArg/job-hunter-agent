@@ -37,6 +37,9 @@ class Job:
     selected_application_channel: str | None = None
     application_channel_used: str | None = None
     raw_data: dict[str, Any] | None = field(default=None, repr=False)
+    sector: str = "Other"
+    sector_confidence: float = 0.0
+    priority_fresh: bool = False
     score: float | None = None
     decision: str | None = None
     reasons: dict[str, Any] = field(default_factory=dict)
@@ -60,6 +63,10 @@ class Profile:
     hard_reject_rules: dict[str, bool]
     scoring_weights: dict[str, float]
     discovery_schedule: dict[str, Any] = field(default_factory=dict)
+    discovery_targets: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    career_pages: list[dict[str, Any]] = field(default_factory=list)
+    preferred_companies: list[str] = field(default_factory=list)
+    priority_fresh_days: int = 3
 
 
 @dataclass(frozen=True, slots=True)
