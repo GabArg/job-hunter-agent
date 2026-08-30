@@ -5,9 +5,17 @@ SOURCE = Path("app/streamlit_app.py").read_text(encoding="utf-8")
 
 
 def test_dashboard_separates_technical_match_from_eligibility():
-    assert 'metric("Match técnico"' in SOURCE
-    assert 'metric("Elegibilidad"' in SOURCE
+    assert '_metric_card("Match técnico"' in SOURCE
+    assert '_metric_card("Elegibilidad"' in SOURCE
     assert 'Motivo principal:' in SOURCE
+
+
+def test_metric_cards_have_dark_high_contrast_classes():
+    for class_name in ("jh-card", "jh-card-label", "jh-card-value", "jh-card-match", "jh-card-reject"):
+        assert class_name in SOURCE
+    assert "background:#151c28" in SOURCE
+    assert "color:#f7f9fc" in SOURCE
+    assert ".stMetric {background:#fff" not in SOURCE
 
 
 def test_job_detail_has_clear_tabs_and_factual_evidence():
@@ -19,6 +27,18 @@ def test_job_detail_has_clear_tabs_and_factual_evidence():
 def test_job_list_has_requested_filters():
     for label in ("Decisión", "Estado operativo", "Modalidad", "Sector", "Canal"):
         assert f'selectbox("{label}"' in SOURCE
+
+
+def test_primary_job_table_is_compact():
+    table_block = SOURCE[SOURCE.index('decision_icons ='):SOURCE.index('choices = {')]
+    for column in ("Puesto", "Empresa", "Score", "Decisión", "Estado", "Modalidad", "Canal", "Fecha"):
+        assert f'"{column}"' in table_block
+    for secondary in ("Ubicación", "Fuente", "Sector", "Oferta"):
+        assert f'"{secondary}"' not in table_block
+
+
+def test_sidebar_uses_advanced_configuration_expander():
+    assert 'st.expander("Configuración avanzada", expanded=False)' in SOURCE
 
 
 def test_raw_json_is_only_rendered_in_technical_expanders():

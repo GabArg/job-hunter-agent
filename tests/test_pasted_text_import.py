@@ -75,7 +75,7 @@ def test_no_url_deduplicates_by_stable_fingerprint(tmp_path):
 def test_internal_url_is_not_exposed_as_dashboard_link():
     source = Path("app/streamlit_app.py").read_text(encoding="utf-8")
     assert is_internal_job_url("manual://abc") and is_internal_job_url("https://manual.invalid/legacy")
-    assert '"Oferta": "" if is_internal_job_url' in source
+    assert 'if is_internal_job_url(str(row["url"]))' in source
     assert "Sin URL pública" in source
 
 

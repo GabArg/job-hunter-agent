@@ -34,6 +34,14 @@ def _display_work_mode(value, description: str = "") -> str:
     return normalize_work_mode(value, description).title()
 
 
+def _compact_source(value) -> str:
+    source = str(value or "—")
+    if source.startswith(("http://", "https://")):
+        from urllib.parse import urlsplit
+        return urlsplit(source).hostname or "web"
+    return source if len(source) <= 34 else source[:31] + "…"
+
+
 BADGE_ICONS = {
     "APPLY": "✅", "REVIEW": "🟡", "REJECT": "🔴", "NEW": "🆕",
     "SHORTLISTED": "⭐", "CV_GENERATED": "📄", "APPROVED_TO_APPLY": "👍",
@@ -51,6 +59,13 @@ def _badge(value, kind: str = "neutral") -> str:
 
 def _badge_row(*values: tuple[object, str]) -> None:
     st.markdown(" ".join(_badge(value, kind) for value, kind in values), unsafe_allow_html=True)
+
+
+def _metric_card(label: str, value, tone: str = "neutral", compact: bool = False, note: str = "") -> str:
+    size = " jh-card-compact" if compact else ""
+    note_html = f'<div class="jh-card-note">{escape(note)}</div>' if note else ""
+    return (f'<div class="jh-card jh-card-{tone}{size}"><div class="jh-card-label">{escape(label)}</div>'
+            f'<div class="jh-card-value">{escape(str(value))}</div>{note_html}</div>')
 
 
 def _render_items(title: str, values, empty: str = "Ninguno") -> None:
@@ -80,12 +95,13 @@ def _render_job_detail(database: JobDatabase, row: dict, master_cv_path: str) ->
     metadata = st.columns(4)
     metadata[0].caption(f"📍 {row.get('location') or 'Ubicación no informada'}")
     metadata[1].caption(f"🏷️ {row.get('sector') or 'Other'}")
-    metadata[2].caption(f"🌐 {row.get('source') or '—'}")
+    metadata[2].caption(f"🌐 {_compact_source(row.get('source'))}")
     metadata[3].caption(f"📅 {_display_time(row.get('published_at'))}")
 
     technical, eligibility = st.columns(2)
-    technical.metric("Match técnico", f"{float(row.get('score') or 0):.0f}%")
-    eligibility.metric("Elegibilidad", row.get("decision") or "—")
+    technical.markdown(_metric_card("Match técnico", f"{float(row.get('score') or 0):.0f}%", "match"), unsafe_allow_html=True)
+    decision_tone = str(row.get("decision") or "neutral").lower()
+    eligibility.markdown(_metric_card("Elegibilidad", row.get("decision") or "—", decision_tone), unsafe_allow_html=True)
     hard_rejects = normalize_reason_list(reasons.get("hard_reject_reasons"))
     if hard_rejects:
         st.error("Motivo principal: " + hard_rejects[0])
@@ -98,9 +114,9 @@ def _render_job_detail(database: JobDatabase, row: dict, master_cv_path: str) ->
     missing = reasons.get("missing_requirements") or reasons.get("missing_skills") or []
     with summary_tab:
         info = st.columns(3)
-        info[0].metric("Publicada", _display_time(row.get("published_at")))
-        info[1].metric("Detectada", _display_time(row.get("first_seen_at")))
-        info[2].metric("Estado", status.replace("_", " ").title())
+        info[0].markdown(_metric_card("Publicada", _display_time(row.get("published_at")), compact=True), unsafe_allow_html=True)
+        info[1].markdown(_metric_card("Detectada", _display_time(row.get("first_seen_at")), compact=True), unsafe_allow_html=True)
+        info[2].markdown(_metric_card("Estado", status.replace("_", " ").title(), "status", True), unsafe_allow_html=True)
         _render_items("Motivos positivos", reasons.get("positive_reasons") or [])
         if is_internal_job_url(str(row["url"])): st.info("Sin URL pública · vacante importada desde texto")
         else: st.link_button("Abrir oferta original", row["url"])
@@ -229,15 +245,24 @@ def _render_application_channel(database: JobDatabase, row: dict, master_cv_path
 st.set_page_config(page_title="Job Hunter Agent", layout="wide")
 st.markdown("""
 <style>
-.block-container {padding-top:1.5rem;padding-bottom:3rem;max-width:1500px}
+.block-container {padding-top:1.25rem;padding-bottom:3rem;max-width:1280px}
+.jh-card {min-height:108px;padding:1rem 1.1rem;border-radius:.8rem;background:#151c28;border:1px solid #303a49;
+box-shadow:0 5px 16px rgba(0,0,0,.18);display:flex;flex-direction:column;justify-content:center;margin-bottom:.55rem}
+.jh-card-label {color:#b9c4d3;font-size:.78rem;font-weight:650;letter-spacing:.035em;text-transform:uppercase}
+.jh-card-value {color:#f7f9fc;font-size:1.75rem;font-weight:750;line-height:1.2;margin-top:.3rem;overflow-wrap:anywhere}
+.jh-card-note {color:#91a0b4;font-size:.72rem;margin-top:.3rem}.jh-card-compact {min-height:76px;padding:.72rem .9rem;box-shadow:none}
+.jh-card-compact .jh-card-value {font-size:1.02rem}.jh-card-match {border-color:#426aa4;background:#172235}
+.jh-card-apply {border-color:#2f8254;background:#14271f}.jh-card-review {border-color:#9a7628;background:#2a2517}
+.jh-card-reject {border-color:#9a3e46;background:#2c181d}.jh-card-status {border-color:#465a80;background:#192131}
 .jh-badge {display:inline-block;padding:.3rem .65rem;margin:.1rem .25rem .35rem 0;border-radius:999px;font-size:.78rem;
-font-weight:700;letter-spacing:.02em;background:#eef2f7;color:#26364a;border:1px solid #dce3ec}
-.jh-apply {background:#e8f7ee;color:#176b3a;border-color:#bde7cc}.jh-review {background:#fff7db;color:#7a5700;border-color:#f2dda0}
-.jh-reject {background:#fdecec;color:#9b2525;border-color:#f3c4c4}.jh-status {background:#edf2ff;color:#2f4b8f;border-color:#cad6f8}
-.jh-channel {background:#f3ecff;color:#62409a;border-color:#dbcaf5}.jh-mode {background:#e9f7f7;color:#176769;border-color:#bfe5e5}
-.jh-chip {display:inline-block;padding:.28rem .58rem;margin:.18rem .2rem .18rem 0;border-radius:.5rem;background:#f5f7fa;
-border:1px solid #e2e7ee;color:#28384c;font-size:.82rem}.stMetric {background:#fff;border:1px solid #e7ebf0;padding:.8rem;border-radius:.75rem}
-div[data-testid="stExpander"] {border-color:#e5e9ef;border-radius:.65rem}
+font-weight:700;letter-spacing:.02em;background:#222b38;color:#e8edf4;border:1px solid #3a4656}
+.jh-apply {background:#173528;color:#8ce0ad;border-color:#2d694a}.jh-review {background:#352d16;color:#f0cf72;border-color:#6d5b24}
+.jh-reject {background:#3a1d22;color:#f09ba3;border-color:#71353d}.jh-status {background:#1d2d49;color:#a9c8ff;border-color:#365783}
+.jh-channel {background:#2b2140;color:#cdb6f4;border-color:#513f73}.jh-mode {background:#183438;color:#9bdbe0;border-color:#2d6268}
+.jh-chip {display:inline-block;padding:.28rem .58rem;margin:.18rem .2rem .18rem 0;border-radius:.5rem;background:#202936;
+border:1px solid #364252;color:#e3e9f1;font-size:.82rem}div[data-testid="stExpander"] {border-color:#354050;border-radius:.65rem}
+@media (max-width:900px){.block-container{padding-left:1rem;padding-right:1rem}.jh-card{min-height:88px}.jh-card-value{font-size:1.35rem}}
+h3,h4 {margin-top:.35rem!important;margin-bottom:.35rem!important}
 </style>
 """, unsafe_allow_html=True)
 st.title("Job Hunter Agent")
@@ -246,12 +271,14 @@ st.caption("Descubrimiento, evaluación y preparación de CV con aprobación hum
 with st.sidebar:
     st.header("Configuración local")
     profile_path = st.text_input("Perfil", "config/profile.yaml")
-    database_path = st.text_input("SQLite", "data/jobs.db")
-    master_cv_path = st.text_input("Master CV privado", "private/master_cv.yaml")
-    discovery_limit = st.number_input("Límite por target", 1, 100, 25)
-    max_age_days = st.number_input("Antigüedad máxima", 1, 365, 14)
-    available_sources = ["remoteok", "arbeitnow", "greenhouse", "lever", "ashby", "workable", "generic"]
-    source_names = st.multiselect("Fuentes", available_sources, default=["remoteok", "arbeitnow"])
+    st.caption("Agente local · aprobación humana activa")
+    with st.expander("Configuración avanzada", expanded=False):
+        database_path = st.text_input("SQLite", "data/jobs.db")
+        master_cv_path = st.text_input("Master CV privado", "private/master_cv.yaml")
+        discovery_limit = st.number_input("Límite por target", 1, 100, 25)
+        max_age_days = st.number_input("Antigüedad máxima", 1, 365, 14)
+        available_sources = ["remoteok", "arbeitnow", "greenhouse", "lever", "ashby", "workable", "generic"]
+        source_names = st.multiselect("Fuentes", available_sources, default=["remoteok", "arbeitnow"])
 
 database = JobDatabase(database_path)
 profile = load_profile(profile_path)
@@ -261,17 +288,17 @@ next_run = next_schedule_time(schedule.get("times", [])) if schedule.get("enable
 counts = database.dashboard_counts()
 all_jobs = database.list_jobs()
 
-top = st.columns(6)
-top[0].metric("Nuevas hoy", counts["new_today"])
-top[1].metric("Recomendadas", counts["recommended"])
-top[2].metric("En revisión", counts["review"])
-top[3].metric("Postuladas", counts["applied"])
-top[4].metric("CVs generados", counts["cvs"])
-top[5].metric("Próxima búsqueda", _display_time(next_run.isoformat()) if next_run else "Desactivada")
-overview = st.columns(3)
-overview[0].metric("Última búsqueda", _display_time(latest_run.get("finished_at")) if latest_run else "Sin ejecuciones")
-overview[1].metric("Último discovery", latest_run.get("status") if latest_run else "Sin ejecuciones")
-overview[2].metric("Vacantes totales", len(all_jobs), delta=f"{database.new_since_latest_discovery()} desde último discovery")
+top = st.columns(5)
+for column, label, value, tone in zip(top,
+    ("Nuevas hoy", "Recomendadas", "En revisión", "Postuladas", "CVs generados"),
+    (counts["new_today"], counts["recommended"], counts["review"], counts["applied"], counts["cvs"]),
+    ("status", "apply", "review", "status", "status")):
+    column.markdown(_metric_card(label, value, tone), unsafe_allow_html=True)
+overview = st.columns(4)
+overview[0].markdown(_metric_card("Última búsqueda", _display_time(latest_run.get("finished_at")) if latest_run else "Sin ejecuciones", compact=True), unsafe_allow_html=True)
+overview[1].markdown(_metric_card("Próxima búsqueda", _display_time(next_run.isoformat()) if next_run else "Desactivada", compact=True), unsafe_allow_html=True)
+overview[2].markdown(_metric_card("Estado discovery", latest_run.get("status") if latest_run else "Sin ejecuciones", "status", True), unsafe_allow_html=True)
+overview[3].markdown(_metric_card("Total vacantes", len(all_jobs), compact=True, note=f"{database.new_since_latest_discovery()} desde último discovery"), unsafe_allow_html=True)
 
 job_hunt_tab, knowledge_tab, system_tab = st.tabs(["Job Hunt", "Knowledge Base", "System / Runs"])
 
@@ -295,9 +322,9 @@ with job_hunt_tab:
                 _badge_row((result.decision, str(result.decision).lower()),
                            (result.application_method, "channel"), (result.work_mode, "mode"))
                 import_metrics = st.columns(3)
-                import_metrics[0].metric("Match técnico", f"{float(result.score or 0):.0f}%")
-                import_metrics[1].metric("Sector", result.sector or "Other")
-                import_metrics[2].metric("Job ID", result.job_id or "—")
+                import_metrics[0].markdown(_metric_card("Match técnico", f"{float(result.score or 0):.0f}%", "match"), unsafe_allow_html=True)
+                import_metrics[1].markdown(_metric_card("Sector", result.sector or "Other", compact=True), unsafe_allow_html=True)
+                import_metrics[2].markdown(_metric_card("Job ID", result.job_id or "—", compact=True), unsafe_allow_html=True)
                 _render_items("Coincidencias", display_concepts(result.reasons.get("matched_requirements", [])))
                 _render_items("Gaps reales", display_concepts(result.reasons.get("missing_requirements") or result.reasons.get("missing_skills", [])))
                 hard = normalize_reason_list(result.reasons.get("hard_reject_reasons"))
@@ -373,7 +400,7 @@ with job_hunt_tab:
         action_row[1].success(f'Discovery completado en {discovery_summary["Duración"]} · {discovery_summary["Fuentes"]}')
         discovery_metrics = st.columns(6)
         for column, key in zip(discovery_metrics, ("Nuevas", "Actualizadas", "Duplicadas", "APPLY", "REVIEW", "REJECT")):
-            column.metric(key, discovery_summary[key])
+            column.markdown(_metric_card(key, discovery_summary[key], key.lower() if key in {"APPLY", "REVIEW", "REJECT"} else "neutral", True), unsafe_allow_html=True)
 
     view_labels = {"Nuevas hoy": "today", "Recomendadas": "recommended", "En revisión": "review",
                    "CVs generados": "cvs", "Postuladas": "applied", "Descartadas": "discarded"}
@@ -401,17 +428,16 @@ with job_hunt_tab:
     else:
         decision_icons = {"APPLY": "✅ APPLY", "REVIEW": "🟡 REVIEW", "REJECT": "🔴 REJECT"}
         method_icons = {"LINK": "🔗 LINK", "EMAIL": "✉️ EMAIL", "LINK_EMAIL": "🔗+✉️ LINK + EMAIL", "UNKNOWN": "❔ UNKNOWN"}
-        st.dataframe([{"ID": row["id"], "Puesto": row["title"], "Empresa": row["company"],
+        st.dataframe([{"Puesto": row["title"], "Empresa": row["company"],
                        "Score": row["score"], "Decisión": decision_icons.get(row["decision"], row["decision"]),
                        "Estado": str(row["application_status"]).replace("_", " ").title(),
-                       "Sector": row.get("sector") or "Other", "Nueva <72h": "🆕" if row.get("priority_fresh") else "",
                        "Modalidad": _display_work_mode(row["work_mode"], row["description"]),
-                       "Ubicación": row.get("location") or "—", "Fuente": row.get("source") or "—",
                        "Canal": method_icons.get(row.get("application_channel_used") or row.get("application_method"), "❔ UNKNOWN"),
-                       "Fecha": _display_time(row.get("published_at") or row["first_seen_at"]),
-                       "Oferta": "" if is_internal_job_url(str(row["url"])) else row["url"]}
-                      for row in rows], hide_index=True, width="stretch",
-                     column_config={"Oferta": st.column_config.LinkColumn("Oferta")})
+                       "Fecha": _display_time(row.get("published_at") or row["first_seen_at"])}
+                      for row in rows], hide_index=True, width="stretch", height=min(460, 42 + len(rows) * 36),
+                     column_config={"Puesto": st.column_config.TextColumn(width="large"),
+                                    "Empresa": st.column_config.TextColumn(width="medium"),
+                                    "Score": st.column_config.NumberColumn(format="%.0f")})
         choices = {f'#{row["id"]} · {row["decision"]} · {row["company"]} · {row["title"]}': row for row in rows}
         choice_labels = list(choices)
         focus_id = st.session_state.get("import_focus_job_id")
@@ -452,10 +478,10 @@ with knowledge_tab:
 with system_tab:
     st.subheader("System / Runs")
     system_metrics = st.columns(4)
-    system_metrics[0].metric("Jobs en SQLite", len(all_jobs))
-    system_metrics[1].metric("Fuentes activas", len(source_names))
-    system_metrics[2].metric("Discovery runs", len(database.list_discovery_runs()))
-    system_metrics[3].metric("Importaciones", len(database.list_import_history()))
+    system_metrics[0].markdown(_metric_card("Jobs en SQLite", len(all_jobs), compact=True), unsafe_allow_html=True)
+    system_metrics[1].markdown(_metric_card("Fuentes activas", len(source_names), compact=True), unsafe_allow_html=True)
+    system_metrics[2].markdown(_metric_card("Discovery runs", len(database.list_discovery_runs()), compact=True), unsafe_allow_html=True)
+    system_metrics[3].markdown(_metric_card("Importaciones", len(database.list_import_history()), compact=True), unsafe_allow_html=True)
     st.subheader("Gmail")
     gmail = GmailEmailProvider()
     account = database.latest_gmail_account()
