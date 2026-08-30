@@ -11,7 +11,7 @@ ROLE_TAGS = {
     "pricing": ["pricing", "sales", "margins", "profitability", "costs", "commercial", "excel"],
     "business": ["business-analysis", "kpi", "reporting", "decision-making", "processes", "stakeholders", "operations"],
     "operations": ["operations", "processes", "kpi", "automation", "root-cause", "optimization"],
-    "data": ["sql", "python", "power-bi", "data-quality", "analytics", "reporting"],
+    "data": ["sql", "python", "power-bi", "data-analysis", "data-quality", "analytics", "reporting"],
     "bi": ["power-bi", "dax", "sql", "excel", "data-visualization", "business-intelligence", "business-analytics", "reporting"],
     "data-science": ["python", "pandas", "numpy", "scikit-learn", "machine-learning", "sql"],
     "data-engineering": ["sql", "postgresql", "apis", "json", "jsonl", "etl", "data-ingestion", "python", "linux", "aws", "oci"],
@@ -118,11 +118,12 @@ def select_facts(job: Job, master: MasterCV, content_mode: str = "concise") -> S
         score += relevance_score(f"{course.institution} {course.program}", keywords)
         if _course_specific_match(course, job):
             score += 30
+        score += _course_role_bonus(course, job)
         if score:
             course_scores.append((score, index))
     course_limit = 2 if content_mode == "concise" else 3
     ranked_courses = sorted(course_scores, key=lambda item: (-item[0], item[1]))
-    threshold = ranked_courses[0][0] * 0.35 if ranked_courses else 0
+    threshold = ranked_courses[0][0] * 0.20 if ranked_courses else 0
     course_indices = [index for score, index in ranked_courses if score >= threshold][:course_limit]
     for index in course_indices:
         selected_ids.update(fact.id for fact in master.courses[index].facts if relevance_score(fact, keywords))
@@ -135,7 +136,20 @@ def select_skills(job: Job, master: MasterCV, selection: Selection, limit: int =
     description = _normalize(job.description)
     scored = []
     role_priorities = _role_skill_priorities(job)
-    for index, skill in enumerate(master.all_skills):
+    hybrid_business_data = _is_hybrid_business_data(job)
+    ai_focused = _matches_any(
+        ("ai automation", "workflow automation", "automatizacion con ia", "n8n", "chatbot", "ai agents", "agentes de ia"),
+        _normalize(f"{job.title} {job.description}"),
+    )
+    inventory = list(master.all_skills)
+    inventory_concepts = {_skill_concept(skill) for skill in inventory}
+    for entry in [*master.experience, *master.projects]:
+        for technology in entry.technologies:
+            concept = _skill_concept(technology)
+            if concept not in inventory_concepts:
+                inventory.append(technology)
+                inventory_concepts.add(concept)
+    for index, skill in enumerate(inventory):
         skill_tag = _skill_tag(skill)
         explicit = 12 if _skill_explicit(skill, skill_tag, text, selection.explicit_tags) else 0
         adjacent_aliases = {
@@ -152,10 +166,17 @@ def select_skills(job: Job, master: MasterCV, selection: Selection, limit: int =
         noise_penalty = 2 if category == "technology" and not explicit else 0
         position = _explicit_position(skill, skill_tag, description)
         role_bonus = max(0, 10 - role_priorities.index(skill_tag)) if skill_tag in role_priorities else 0
-        scored.append((explicit + adjacent + role_bonus - noise_penalty, position, index, skill))
-    positive = [item for item in sorted(scored, key=lambda item: (-item[0], item[1], item[2])) if item[0] > 0]
+        if hybrid_business_data and skill_tag in role_priorities[:8]:
+            role_bonus += 8
+        focused_limit = 10 if hybrid_business_data else 6 if ai_focused else 0
+        core_rank = role_priorities.index(skill_tag) if focused_limit and skill_tag in role_priorities[:focused_limit] else 10_000
+        group = 0 if core_rank < 10_000 else 1 if explicit else 2
+        scored.append((explicit + adjacent + role_bonus - noise_penalty, group, core_rank, position, index, skill))
+    positive = [item for item in sorted(
+        scored, key=lambda item: (item[1], item[2] if item[1] == 0 else item[3], -item[0], item[4])
+    ) if item[0] > 0]
     selected, seen_concepts = [], set()
-    for _, _, _, skill in positive:
+    for _, _, _, _, _, skill in positive:
         concept = _skill_concept(skill)
         if concept in seen_concepts:
             continue
@@ -192,6 +213,10 @@ def _summary_facts(facts: list[FactualText], keywords: list[str]) -> list[Factua
     desired = ["summary_01", "summary_02", "summary_07", "summary_03", "summary_05", "summary_08"]
     if "pricing" in keywords or "commercial" in keywords:
         desired.insert(2, "summary_04")
+    if any(value in keywords for value in ("etl", "data-ingestion", "automation")):
+        desired.append("summary_06")
+    if any(value in keywords for value in ("n8n", "ai-agents", "chatbots", "generative-ai")):
+        desired.append("summary_09")
     by_id = {fact.id: fact for fact in facts}
     selected = [by_id[identifier] for identifier in desired if identifier in by_id]
     return selected or _diverse_top(facts, keywords, 6)
@@ -259,7 +284,7 @@ def _skill_explicit(skill: str, tag: str, text: str, explicit_tags: list[str]) -
         "process-improvement": "processes", "stakeholder-management": "stakeholders",
         "operations-analytics": "operations", "decision-making": "decision-making",
     }
-    return _normalize(skill) in text or tag in {_normalize_tag(value) for value in explicit_tags} or aliases.get(tag) in explicit_tags
+    return _term_matches(skill, text) or tag in {_normalize_tag(value) for value in explicit_tags} or aliases.get(tag) in explicit_tags
 
 
 def _explicit_position(skill: str, tag: str, description: str) -> int:
@@ -280,11 +305,18 @@ def _skill_tag(skill: str) -> str:
 
 def _skill_concept(skill: str) -> str:
     tag = _skill_tag(skill)
-    return "apis" if tag in {"apis", "api"} else tag
+    if tag in {"apis", "api"}: return "apis"
+    if tag in {"ai", "generative-ai"}: return "generative-ai"
+    return tag
 
 
 def _role_skill_priorities(job: Job) -> list[str]:
     text = _normalize(f"{job.title} {job.description}")
+    hybrid_business_data = _is_hybrid_business_data(job)
+    hybrid_priorities = [
+        "sql", "python", "power-bi", "excel", "business-analysis", "data-analysis",
+        "reporting", "stakeholder-management", "kpi-design", "business-analytics",
+    ] if hybrid_business_data else []
     families = []
     patterns = (
         ("pricing", ("pricing", "precios", "margenes", "rentabilidad")),
@@ -304,7 +336,15 @@ def _role_skill_priorities(job: Job) -> list[str]:
         and _matches_any(("data analyst", "analista de datos", "analytics"), text)
     ):
         families.append("data")
-    return _unique(tag for family in families for tag in ROLE_TAGS[family])
+    return _unique([*hybrid_priorities, *(tag for family in families for tag in ROLE_TAGS[family])])
+
+
+def _is_hybrid_business_data(job: Job) -> bool:
+    text = _normalize(f"{job.title} {job.description}")
+    return (
+        _matches_any(("business analyst", "analista de negocios"), text)
+        and _matches_any(("data", "datos", "analytics", "data warehouse", "data-driven"), text)
+    )
 
 
 def _is_security_course(course) -> bool:
@@ -320,6 +360,25 @@ def _course_specific_match(course, job: Job) -> bool:
     course_pairs = {tuple(course_terms[index:index + 2]) for index in range(len(course_terms) - 1)}
     generic = {"data", "datos", "python", "sql", "analytics", "analitica", "analisis", "con", "and", "para", "the", "y"}
     return any(any(len(term) >= 4 and term not in generic for term in pair) for pair in job_pairs & course_pairs)
+
+
+def _course_role_bonus(course, job: Job) -> int:
+    """Prefer training supporting the role's core stack over generic word overlap."""
+    identity = _normalize(f"{course.institution} {course.program} {' '.join(f.text for f in course.facts)}")
+    priorities = _role_skill_priorities(job)[:10]
+    bonus = sum(max(1, 8 - index) for index, tag in enumerate(priorities) if _keyword_in_text(tag, identity))
+    job_text = _normalize(f"{job.title} {job.description}")
+    if "aws re/start" in identity and not _term_matches("aws", job_text):
+        bonus -= 20
+    elif "aws re/start" in identity:
+        bonus += 20
+    if ("oracle cloud" in identity or " oci " in f" {identity} ") and not (
+        _term_matches("oci", job_text) or _term_matches("oracle cloud", job_text)
+    ):
+        bonus -= 12
+    elif "oracle cloud" in identity or " oci " in f" {identity} ":
+        bonus += 12
+    return bonus
 
 
 def _matches_any(terms, text: str) -> bool:

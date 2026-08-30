@@ -123,8 +123,8 @@ evidencia, empresas o tecnologías ausentes del maestro. El HTML se conserva com
 preview/debug y `generate-cv` produce el formato principal de entrega:
 
 ```text
-outputs/cvs/<job-id>/cv.html
-outputs/cvs/<job-id>/cv.pdf
+outputs/cvs/<job-id>/Guido_Broccoli_CV_<Role>_<Company>.html
+outputs/cvs/<job-id>/Guido_Broccoli_CV_<Role>_<Company>.pdf
 ```
 
 ### PDF ATS-friendly

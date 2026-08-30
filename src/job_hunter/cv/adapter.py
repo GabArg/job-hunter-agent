@@ -26,7 +26,7 @@ class RuleBasedCVTextGenerator(CVTextGenerator):
         return FactualBullet(text=rewrite_fact(fact), source_fact_ids=[fact.id])
 
     def summary(self, selection: Selection) -> tuple[str, list[str]]:
-        return self.summary_composer.compose(selection.summary)
+        return self.summary_composer.compose(selection.summary, selection.keywords)
 
 
 class LLMCVTextGenerator(CVTextGenerator):

@@ -128,7 +128,8 @@ def test_cli_generate_cv(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["job-hunter", "generate-cv", str(job_id), "--database", str(database.path),
                                       "--master-cv", MASTER, "--output", str(tmp_path / "outputs")])
     main(); output = capsys.readouterr().out
-    assert "PDF: PDF_VALID" in output and (tmp_path / "outputs" / str(job_id) / "cv.pdf").is_file()
+    generated = list((tmp_path / "outputs" / str(job_id)).glob("Guido_Broccoli_CV_*.pdf"))
+    assert "PDF: PDF_VALID" in output and len(generated) == 1
 
 
 def test_dashboard_exposes_pdf_status_and_download():

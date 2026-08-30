@@ -88,7 +88,7 @@ def test_mime_recipient_subject_body_attachment_and_base64(tmp_path):
     assert message["To"] == "jobs@example.com" and message["Subject"] == "Postulación"
     assert message.get_body(preferencelist=("plain",)).get_content().strip() == "Cuerpo aprobado"
     attachment = next(message.iter_attachments())
-    assert attachment.get_filename() == "Guido_Broccoli_CV.pdf"
+    assert attachment.get_filename() == pdf.name
     assert attachment.get_content_type() == "application/pdf" and attachment.get_payload(decode=True) == pdf.read_bytes()
     assert base64.urlsafe_b64encode(base64.urlsafe_b64decode(raw)).decode("ascii") == raw
 

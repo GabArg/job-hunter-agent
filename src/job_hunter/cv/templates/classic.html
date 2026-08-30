@@ -16,7 +16,9 @@
     h2 { color: #243b64; font-size: 12pt; text-transform: uppercase; letter-spacing: .7px;
       border-bottom: 1px solid #b8c2d1; margin: 14px 0 7px; padding-bottom: 2px; }
     p { margin: 4px 0; }
-    .entry { break-inside: avoid; margin: 0 0 9px; }
+    .entry { break-inside: auto; margin: 0 0 8px; }
+    .entry-head, .entry > strong, h2 { break-after: avoid; page-break-after: avoid; }
+    .entry li { break-inside: avoid; }
     .entry-head { display: flex; justify-content: space-between; gap: 12px; }
     .organization, .tech { color: #46566e; font-size: 9.5pt; }
     ul { margin: 4px 0 4px 18px; padding: 0; }

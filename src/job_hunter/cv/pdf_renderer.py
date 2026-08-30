@@ -31,6 +31,13 @@ class PdfRenderResult:
     file_size_bytes: int = 0
     validation_status: str = PDF_NOT_GENERATED
     warnings: list[str] = field(default_factory=list)
+    page_text_lengths: list[int] = field(default_factory=list)
+
+    @property
+    def page_balance_ratio(self) -> float:
+        if len(self.page_text_lengths) < 2 or not max(self.page_text_lengths):
+            return 1.0
+        return min(self.page_text_lengths) / max(self.page_text_lengths)
 
 
 PdfBackend = Callable[[Path, Path], None]
@@ -59,6 +66,8 @@ def render_cv_pdf(adapted_cv: AdaptedCV, output_path: str | Path, html_path: str
             last_result = PdfRenderResult(pdf_path, html_target, validation_status=PDF_INVALID,
                                           warnings=[f"Falló el backend PDF: {exc}"])
         if last_result.page_count <= 2 and last_result.validation_status == PDF_VALID:
+            if last_result.page_count == 2 and last_result.page_balance_ratio < 0.6 and level < 2:
+                continue
             if level:
                 last_result.warnings.append(f"Se aplicó compresión de nivel {level} para respetar dos páginas.")
             return last_result
@@ -77,7 +86,8 @@ def validate_pdf(pdf_path: str | Path, adapted_cv: AdaptedCV, html_path: str | P
     size = pdf.stat().st_size
     try:
         reader = PdfReader(str(pdf)); pages = len(reader.pages)
-        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        page_text = [page.extract_text() or "" for page in reader.pages]
+        text = "\n".join(page_text)
     except Exception as exc:
         return PdfRenderResult(pdf, html, file_size_bytes=size, validation_status=PDF_INVALID,
                                warnings=[f"No se pudo leer el PDF: {exc}"])
@@ -94,8 +104,10 @@ def validate_pdf(pdf_path: str | Path, adapted_cv: AdaptedCV, html_path: str | P
         expected = adapted_cv.personal.get(key, "").strip()
         if expected and expected.casefold() not in text.casefold():
             warnings.append(f"No se encontró el contacto factual: {key}.")
+    if len(pdf.name) > 120 or not all(character.isalnum() or character in "._-" for character in pdf.name):
+        warnings.append("El nombre del PDF no es seguro para el filesystem.")
     status = PDF_VALID if not warnings and pages <= 2 else TOO_LONG if pages > 2 else PDF_INVALID
-    return PdfRenderResult(pdf, html, pages, size, status, warnings)
+    return PdfRenderResult(pdf, html, pages, size, status, warnings, [len(value.strip()) for value in page_text])
 
 
 class EdgePdfBackend:
@@ -137,7 +149,7 @@ class ReportLabPdfBackend:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.lib.units import mm
-        from reportlab.platypus import KeepTogether, ListFlowable, ListItem, Paragraph, SimpleDocTemplate, Spacer
+        from reportlab.platypus import KeepTogether, ListFlowable, ListItem, PageBreak, Paragraph, SimpleDocTemplate, Spacer
 
         density = self.density
         body_size = (10.2, 9.8, 9.5)[density]
@@ -167,25 +179,28 @@ class ReportLabPdfBackend:
                  Paragraph(_contact_markup(self.cv.personal), contact_style)]
 
         def section(title: str): story.append(Paragraph(_xml(title.upper()), heading))
-        def bullets(values):
-            if values:
-                story.append(ListFlowable([ListItem(Paragraph(_xml(value.text), body), leftIndent=8)
-                                           for value in values], bulletType="bullet", leftIndent=12,
-                                          bulletFontName="Helvetica", bulletFontSize=6, spaceAfter=gap))
+        def bullet_flow(values):
+            return ListFlowable([ListItem(Paragraph(_xml(value.text), body), leftIndent=8)
+                                 for value in values], bulletType="bullet", leftIndent=12,
+                                bulletFontName="Helvetica", bulletFontSize=6, spaceAfter=gap)
 
         section("Perfil profesional"); story.append(Paragraph(_xml(self.cv.professional_summary), body))
         if self.cv.experience_sections:
             section("Experiencia")
             for value in self.cv.experience_sections:
-                block = [Paragraph(f"{_xml(value.role)} · {_xml(value.company)}", item_head),
-                         Paragraph(f"{_xml(value.start_date)} – {_xml(value.end_date)}", meta)]
-                bullet_flow = ListFlowable([ListItem(Paragraph(_xml(bullet.text), body), leftIndent=8)
-                                            for bullet in value.bullets], bulletType="bullet", leftIndent=12,
-                                           bulletFontSize=6, spaceAfter=gap)
-                block.append(bullet_flow)
-                if value.technologies: block.append(Paragraph("Tecnologías: " + _xml(" · ".join(value.technologies)), meta))
-                story.append(KeepTogether(block)); story.append(Spacer(1, gap))
+                head = [Paragraph(f"{_xml(value.role)} · {_xml(value.company)}", item_head),
+                        Paragraph(f"{_xml(value.start_date)} – {_xml(value.end_date)}", meta)]
+                if value.bullets:
+                    head.append(bullet_flow(value.bullets[:1]))
+                story.append(KeepTogether(head))
+                if len(value.bullets) > 1:
+                    story.append(bullet_flow(value.bullets[1:]))
+                if value.technologies:
+                    story.append(Paragraph("Tecnologías: " + _xml(" · ".join(value.technologies)), meta))
+                story.append(Spacer(1, gap))
         if self.cv.project_sections:
+            if len(self.cv.experience_sections) >= 3 and len(self.cv.project_sections) >= 2:
+                story.append(PageBreak())
             section("Proyectos destacados")
             for value in self.cv.project_sections:
                 block = [Paragraph(_xml(value.name), item_head)]
@@ -235,7 +250,13 @@ def _contact_markup(personal: dict[str, str]) -> str:
 
 def _link_markup(value: str) -> str:
     href = value if value.startswith(("http://", "https://")) else "https://" + value
-    return f'<link href="{_xml(href)}">{_xml(value)}</link>'
+    normalized = value.rstrip("/")
+    if "github.com/" in normalized.casefold():
+        tail = normalized.casefold().split("github.com/", 1)[1].strip("/")
+        label = "Repositorio" if "/" in tail else "GitHub"
+    else:
+        label = "Proyecto"
+    return f'<link href="{_xml(href)}">{_xml(label)}</link>'
 
 
 def _with_pdf_density(document: str, level: int) -> str:

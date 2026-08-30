@@ -116,8 +116,8 @@ def build_gmail_message(recipient: str, subject: str, body: str, pdf_path: str |
     address = parseaddr(recipient)[1]
     if not address or address != recipient or "@" not in address: raise ValueError("Invalid recipient")
     attachment = Path(pdf_path)
-    if not attachment.is_file() or attachment.name != "cv.pdf" or attachment.suffix.lower() != ".pdf":
-        raise ValueError("A generated cv.pdf attachment is required")
+    if not attachment.is_file() or attachment.suffix.lower() != ".pdf":
+        raise ValueError("A generated PDF CV attachment is required")
     try:
         from pypdf import PdfReader
         reader = PdfReader(str(attachment))
@@ -132,7 +132,7 @@ def build_gmail_message(recipient: str, subject: str, body: str, pdf_path: str |
     message["To"] = recipient; message["Subject"] = subject
     message.set_content(body, subtype="plain", charset="utf-8")
     message.add_attachment(attachment.read_bytes(), maintype="application", subtype="pdf",
-                           filename="Guido_Broccoli_CV.pdf")
+                           filename=attachment.name)
     return base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
 
 
@@ -148,7 +148,7 @@ def create_approved_gmail_draft(database: "JobDatabase", job_id: int,
         raise ValueError("Gmail draft payload must match the approved stored draft")
     attachment = Path(draft.attachments[0]).resolve() if len(draft.attachments) == 1 else Path()
     expected = Path(row["cv_pdf_path"] or "").resolve()
-    if not attachment.is_file() or attachment != expected or attachment.name != "cv.pdf" or attachment.parent.name != str(job_id):
+    if not attachment.is_file() or attachment != expected or attachment.suffix.lower() != ".pdf" or attachment.parent.name != str(job_id):
         raise ValueError("Attachment must be the VALID PDF generated for this job")
     try:
         if provider.service is None:
@@ -185,7 +185,7 @@ def send_approved_email(database: "JobDatabase", job_id: int, provider: EmailPro
     if len(draft.attachments) != 1:
         raise ValueError("Exactly one generated CV attachment is required")
     attachment = Path(draft.attachments[0]).resolve()
-    if not attachment.is_file() or attachment.name != "cv.pdf" or attachment.parent.name != str(job_id):
+    if not attachment.is_file() or attachment.suffix.lower() != ".pdf" or attachment.parent.name != str(job_id):
         raise ValueError("Attachment must be the generated CV for this job")
     message_id = provider.send(draft, row.get("email_message_id"))
     database.mark_email_sent(job_id, message_id, "EMAIL")

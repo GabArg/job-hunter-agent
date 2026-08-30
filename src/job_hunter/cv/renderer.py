@@ -56,7 +56,7 @@ def _projects(cv: AdaptedCV) -> str:
     body = "".join(
         f'<section class="entry"><strong>{_e(section.name)}</strong><div>{_e(section.description)}</div>'
         f'{_bullets(section.bullets)}<div class="tech">{", ".join(_e(value) for value in section.technologies)}</div>'
-        f'{" ".join(_html_link(value) for value in section.links)}</section>'
+        f'{" ".join(_html_link(value, _project_link_label(value)) for value in section.links)}</section>'
         for section in cv.project_sections
     )
     return f"<h2>Proyectos</h2>{body}"
@@ -96,9 +96,17 @@ def _contact(personal: dict[str, str]) -> str:
     return " · ".join(values)
 
 
-def _html_link(value: str) -> str:
+def _html_link(value: str, label: str | None = None) -> str:
     href = value if value.startswith(("https://", "http://")) else "https://" + value
-    return f'<a href="{_e(href)}">{_e(value)}</a>'
+    return f'<a href="{_e(href)}">{_e(label or value)}</a>'
+
+
+def _project_link_label(value: str) -> str:
+    normalized = value.rstrip("/")
+    if "github.com/" in normalized.casefold():
+        tail = normalized.casefold().split("github.com/", 1)[1].strip("/")
+        return "Repositorio" if "/" in tail else "GitHub"
+    return "Proyecto"
 
 
 def _e(value: str) -> str:

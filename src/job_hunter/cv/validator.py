@@ -37,7 +37,7 @@ def validate_cv(cv: AdaptedCV, master: MasterCV) -> None:
         errors.append("Summary references invalid facts")
     else:
         source_facts = [master.fact_index[identifier] for identifier in cv.professional_summary_source_fact_ids]
-        expected, expected_ids = RuleBasedSummaryComposer().compose(source_facts)
+        expected, expected_ids = RuleBasedSummaryComposer().compose(source_facts, cv.selected_keywords)
         if cv.professional_summary != expected:
             errors.append("Summary is not the approved factual composition")
         if cv.professional_summary_source_fact_ids != expected_ids:

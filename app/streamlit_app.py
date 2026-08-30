@@ -106,6 +106,14 @@ def _reasons(row: dict) -> dict:
     except (TypeError, ValueError, json.JSONDecodeError): return {}
 
 
+def _cv_paths(row: dict) -> tuple[Path, Path]:
+    """Resolve persisted professional paths while preserving legacy CV access."""
+    job_id = int(row["id"])
+    stored = Path(str(row.get("cv_pdf_path") or ""))
+    pdf_path = stored if str(stored) not in {"", "."} else Path("outputs/cvs") / str(job_id) / "cv.pdf"
+    return pdf_path.with_suffix(".html"), pdf_path
+
+
 def _render_job_detail(database: JobDatabase, row: dict, master_cv_path: str) -> None:
     reasons = _reasons(row)
     job_id, status = int(row["id"]), str(row["application_status"])
@@ -163,7 +171,7 @@ def _render_job_detail(database: JobDatabase, row: dict, master_cv_path: str) ->
                     with st.expander(display_concepts([concept])[0]):
                         for source in sources: st.write(f"• `{source}`")
         else: st.caption("Esta evaluación no tiene evidencia detallada registrada todavía.")
-    cv_path = Path("outputs/cvs") / str(job_id) / "cv.html"
+    cv_path, _ = _cv_paths(row)
     with application_tab: _render_application_channel(database, row, master_cv_path, cv_path)
     with cv_tab: _render_cv_email_status(database, row, master_cv_path, cv_path)
     with description_tab:
@@ -193,9 +201,9 @@ def _render_cv_email_status(database: JobDatabase, row: dict, master_cv_path: st
     else: st.warning("La generación normal de CV está deshabilitada para REJECT.")
     if cv_path.exists():
         downloads = st.columns(2)
-        downloads[0].download_button("Ver HTML", cv_path.read_text(encoding="utf-8"), "cv.html", "text/html", key=f"view-{job_id}")
+        downloads[0].download_button("Ver HTML", cv_path.read_text(encoding="utf-8"), cv_path.name, "text/html", key=f"view-{job_id}")
         if row.get("cv_pdf_status") == "PDF_VALID" and pdf_path.exists():
-            downloads[1].download_button("Descargar PDF", pdf_path.read_bytes(), "cv.pdf", "application/pdf", key=f"pdf-{job_id}")
+            downloads[1].download_button("Descargar PDF", pdf_path.read_bytes(), pdf_path.name, "application/pdf", key=f"pdf-{job_id}")
             st.caption(f"PDF válido · {row.get('cv_pdf_pages') or '—'} página(s)")
         elif row.get("cv_pdf_status") not in {"PDF_NOT_GENERATED", None}:
             st.warning(f"PDF inválido: {row.get('cv_pdf_status')}")

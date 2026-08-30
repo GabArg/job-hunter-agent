@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from .cv import adapt_cv, load_master_cv, render_cv_pdf
+from .cv import adapt_cv, load_master_cv, professional_cv_paths, render_cv_pdf
 from .database import JobDatabase
 from .application import EmailComposer, EmailDraft
 
@@ -15,7 +15,8 @@ def generate_job_cv(database_path: str | Path, job_id: int, master_path: str | P
     if job is None: raise KeyError(f"Job not found: {job_id}")
     adapted = adapt_cv(job, load_master_cv(master_path), allow_reject=allow_reject)
     base = Path(output_root) / str(job_id)
-    rendered = render_cv_pdf(adapted, base / "cv.pdf", base / "cv.html")
+    pdf_path, html_path = professional_cv_paths(base, adapted)
+    rendered = render_cv_pdf(adapted, pdf_path, html_path)
     database.set_cv_pdf_result(job_id, rendered.pdf_path, rendered.validation_status, rendered.page_count)
     if rendered.validation_status != "PDF_VALID":
         raise ValueError("PDF CV validation failed: " + "; ".join(rendered.warnings))
@@ -30,10 +31,9 @@ def prepare_application_email(database_path: str | Path, job_id: int, master_pat
     if row["application_method"] not in {"EMAIL", "LINK_EMAIL"}: raise ValueError("This job has no reviewed email application channel")
     if row["application_method"] == "LINK_EMAIL" and row["selected_application_channel"] != "EMAIL":
         raise ValueError("Select EMAIL before preparing the draft")
-    base = Path(output_root) / str(job_id)
-    if row.get("cv_pdf_status") != "PDF_VALID" or not (base / "cv.pdf").is_file():
+    cv_path = Path(row.get("cv_pdf_path") or "")
+    if row.get("cv_pdf_status") != "PDF_VALID" or not cv_path.is_file():
         raise ValueError("Generate and validate the PDF CV before preparing an email")
-    cv_path = base / "cv.pdf"
     draft = EmailComposer().compose(job, load_master_cv(master_path), cv_path, allow_html_development=False)
     database.save_email_draft(job_id, draft.recipient, draft.subject, draft.body)
     return draft
