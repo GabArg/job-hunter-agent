@@ -19,7 +19,7 @@ def test_metric_cards_have_dark_high_contrast_classes():
 
 
 def test_job_detail_has_clear_tabs_and_factual_evidence():
-    assert '["Resumen", "Match", "Postulación", "CV / Email", "Descripción", "Debug"]' in SOURCE
+    assert '["Resumen", "Match", "Postulación", "Seguimiento", "CV / Email", "Descripción", "Debug"]' in SOURCE
     assert 'matched_requirement_evidence' in SOURCE
     assert 'Evidencia factual del match' in SOURCE
 
@@ -72,7 +72,15 @@ def test_raw_json_is_only_rendered_in_technical_expanders():
 
 def test_dashboard_keeps_core_actions():
     for label in ("Generar CV", "Ver HTML", "Descargar PDF", "Preparar email", "Aprobar email",
-                  "Crear borrador en Gmail", "Marcar como postulada por link", "Descartar"):
+                  "Crear borrador en Gmail", "Marcar como postulada", "Descartar"):
         assert label in SOURCE
     assert 'st.markdown("#### Acciones")' in SOURCE
+
+
+def test_tracking_and_analytics_use_dark_components_without_public_notes_json():
+    assert '["Job Hunt", "Seguimiento", "Analytics", "Knowledge Base", "System / Runs"]' in SOURCE
+    for label in ("Procesos activos", "Response rate", "Funnel", "Postulaciones por tiempo",
+                  "Performance por rol", "Performance por fuente", "Performance por canal"):
+        assert label in SOURCE
+    assert "application_history" in SOURCE and "st.json(history" not in SOURCE
     assert '"🗑️ Descartar", key=f"skip-{job_id}", type="secondary"' in SOURCE

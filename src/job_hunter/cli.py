@@ -9,7 +9,7 @@ from .config import load_profile
 from .discovery.factory import build_sources
 from .pipeline import run_discovery_pipeline, run_pipeline
 from .cv import HTMLCVRenderer, adapt_cv, load_master_cv
-from .database import JobDatabase
+from .database import APPLICATION_STAGES, JobDatabase
 from .discovery.lock import DiscoveryAlreadyRunning, DiscoveryLock
 from .knowledge import KnowledgeUpdater, ProposalGenerator
 from .operations import generate_job_cv
@@ -76,6 +76,13 @@ def build_parser() -> argparse.ArgumentParser:
     generate_cv.add_argument("--output", default="outputs/cvs")
     generate_cv.add_argument("--database", default="data/jobs.db")
     generate_cv.add_argument("--allow-reject", action="store_true")
+    tracking = subparsers.add_parser("tracking-summary", help="Show local application tracking analytics")
+    tracking.add_argument("--database", default="data/jobs.db")
+    set_stage = subparsers.add_parser("set-stage", help="Manually record an application stage")
+    set_stage.add_argument("job_id", type=int); set_stage.add_argument("stage", choices=sorted(APPLICATION_STAGES))
+    set_stage.add_argument("--note"); set_stage.add_argument("--database", default="data/jobs.db")
+    history = subparsers.add_parser("application-history", help="Show the append-only stage timeline")
+    history.add_argument("job_id", type=int); history.add_argument("--database", default="data/jobs.db")
     gmail_status = subparsers.add_parser("gmail-status", help="Show local Gmail OAuth status without secrets")
     gmail_status.add_argument("--credentials-dir", default="private/gmail")
     gmail_status.add_argument("--database", default="data/jobs.db")
@@ -140,6 +147,26 @@ def main() -> None:
                 f"scored={stat.scored} APPLY={stat.apply_count} REVIEW={stat.review_count} REJECT={stat.reject_count} "
                 f"duplicates={stat.duplicates} latency_ms={stat.latency_ms} status={status}"
             )
+    elif args.command == "tracking-summary":
+        from .tracking import analytics_snapshot
+        database = JobDatabase(args.database); jobs = database.tracking_jobs()
+        histories = {int(row["id"]): database.application_history(int(row["id"])) for row in jobs}
+        snapshot = analytics_snapshot(jobs, histories)
+        print(" | ".join(f"{key}={value}" for key, value in snapshot["kpis"].items()))
+        print(" | ".join(f"{key}={value:.1f}%" for key, value in snapshot["rates"].items()))
+        return
+    elif args.command == "set-stage":
+        database = JobDatabase(args.database)
+        if args.stage == "APPLIED": database.mark_applied(args.job_id, note=args.note)
+        else: database.set_application_stage(args.job_id, args.stage, note=args.note)
+        print(f"Job #{args.job_id}: {args.stage}")
+        return
+    elif args.command == "application-history":
+        database = JobDatabase(args.database)
+        for event in database.application_history(args.job_id):
+            note = f" | {event['note']}" if event.get("note") else ""
+            print(f"{event['changed_at']} | {event['from_stage']} -> {event['to_stage']} | {event['source']}{note}")
+        return
     elif args.command == "discovery-report":
         from .discovery.target_registry import TargetRegistry
         profile = load_profile(args.profile); database = JobDatabase(args.database)

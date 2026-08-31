@@ -20,6 +20,7 @@ from job_hunter.discovery.matching import parse_datetime
 from job_hunter.scorer import normalize_reason_list
 from job_hunter.semantics import display_concepts
 from job_hunter.normalizer import normalize_work_mode
+from job_hunter.tracking import ACTIVE_STAGES, CLOSED_STAGES, analytics_snapshot, tracking_row
 from job_hunter.importer import (ImportStatus, import_job_from_url, import_manual_job,
                                  is_internal_job_url)
 
@@ -56,6 +57,14 @@ STATUS_LABELS = {
 }
 WORK_MODE_LABELS = {"remote": "Remoto", "hybrid": "Híbrido", "onsite": "Presencial", "unknown": "No informado"}
 METHOD_LABELS = {"EMAIL": "Email", "LINK": "Link", "LINK_EMAIL": "Link + Email", "UNKNOWN": "No detectado"}
+STAGE_LABELS = {
+    "NOT_APPLIED": "No postulado", "APPLIED": "Postulado", "RECRUITER_VIEWED": "Visto por recruiter",
+    "RECRUITER_CONTACT": "Contacto recruiter", "HR_INTERVIEW": "Entrevista RRHH",
+    "TECH_INTERVIEW": "Entrevista técnica", "BUSINESS_INTERVIEW": "Entrevista con negocio",
+    "FINAL_INTERVIEW": "Entrevista final", "ASSESSMENT": "Assessment / challenge", "OFFER": "Oferta",
+    "HIRED": "Contratado", "REJECTED": "Rechazado", "WITHDRAWN": "Retirado",
+    "CLOSED_NO_RESPONSE": "Cerrado sin respuesta",
+}
 
 
 def _display_decision(value) -> str:
@@ -68,6 +77,15 @@ def _display_status(value) -> str:
 
 def _display_method(value) -> str:
     return METHOD_LABELS.get(str(value or "UNKNOWN").upper(), str(value or "—"))
+
+
+def _stage_tone(stage: str) -> str:
+    if stage in {"REJECTED", "CLOSED_NO_RESPONSE"}: return "stage-rejected"
+    if stage in {"HIRED"}: return "stage-hired"
+    if stage in {"OFFER"}: return "stage-offer"
+    if stage in {"HR_INTERVIEW", "TECH_INTERVIEW", "BUSINESS_INTERVIEW", "FINAL_INTERVIEW", "ASSESSMENT"}: return "stage-interview"
+    if stage in {"RECRUITER_VIEWED", "RECRUITER_CONTACT"}: return "stage-response"
+    return "status"
 
 
 def _badge(value, kind: str = "neutral") -> str:
@@ -136,8 +154,8 @@ def _render_job_detail(database: JobDatabase, row: dict, master_cv_path: str) ->
     if hard_rejects:
         st.error("Motivo principal: " + hard_rejects[0])
 
-    summary_tab, match_tab, application_tab, cv_tab, description_tab, debug_tab = st.tabs(
-        ["Resumen", "Match", "Postulación", "CV / Email", "Descripción", "Debug"]
+    summary_tab, match_tab, application_tab, tracking_tab, cv_tab, description_tab, debug_tab = st.tabs(
+        ["Resumen", "Match", "Postulación", "Seguimiento", "CV / Email", "Descripción", "Debug"]
     )
     requirements = reasons.get("job_requirements") or []
     matched = reasons.get("matched_requirements") or reasons.get("matched_skills") or []
@@ -173,6 +191,7 @@ def _render_job_detail(database: JobDatabase, row: dict, master_cv_path: str) ->
         else: st.caption("Esta evaluación no tiene evidencia detallada registrada todavía.")
     cv_path, _ = _cv_paths(row)
     with application_tab: _render_application_channel(database, row, master_cv_path, cv_path)
+    with tracking_tab: _render_tracking_card(database, row)
     with cv_tab: _render_cv_email_status(database, row, master_cv_path, cv_path)
     with description_tab:
         description = str(row.get("description") or "")
@@ -237,8 +256,6 @@ def _render_application_channel(database: JobDatabase, row: dict, master_cv_path
     if method in {"LINK", "LINK_EMAIL"}:
         st.link_button("Abrir postulación", row.get("application_url") or row["url"])
         st.caption("Abrir el enlace no cambia el estado de la vacante.")
-        if selected == "LINK" and st.button("Marcar como postulada por link", key=f"link-applied-{job_id}"):
-            database.mark_link_applied(job_id); st.rerun()
     if method not in {"EMAIL", "LINK_EMAIL"} or selected != "EMAIL": return
     st.write(f'Para: **{row.get("application_email") or "Requiere revisión"}**')
     pdf_path = cv_path.with_suffix(".pdf")
@@ -273,6 +290,129 @@ def _render_application_channel(database: JobDatabase, row: dict, master_cv_path
     elif row.get("email_draft_status") == "GMAIL_DRAFT_STALE":
         st.warning("El contenido cambió después de crear el borrador. Creá uno nuevo.")
 
+
+def _render_tracking_card(database: JobDatabase, row: dict) -> None:
+    job_id = int(row["id"]); current = row.get("application_stage") or "NOT_APPLIED"
+    st.markdown("#### SEGUIMIENTO")
+    if current == "NOT_APPLIED":
+        st.info("La vacante todavía no está registrada como postulada.")
+        if st.button("Marcar como postulada", key=f"mark-applied-{job_id}", type="primary"):
+            channel = row.get("selected_application_channel") or row.get("application_method")
+            database.mark_applied(job_id, channel=channel if channel in {"EMAIL", "LINK"} else None)
+            st.rerun()
+        return
+    tracked = tracking_row(row)
+    cards = st.columns(4)
+    cards[0].markdown(_metric_card("Etapa actual", STAGE_LABELS.get(current, current), _stage_tone(current), True), unsafe_allow_html=True)
+    cards[1].markdown(_metric_card("Postulado", _display_time(row.get("applied_at")) if row.get("applied_at") else "Fecha no registrada", compact=True), unsafe_allow_html=True)
+    cards[2].markdown(_metric_card("Días en etapa", tracked.get("days_in_stage") if tracked.get("days_in_stage") is not None else "—", compact=True), unsafe_allow_html=True)
+    cards[3].markdown(_metric_card("Último movimiento", _display_time(row.get("stage_updated_at") or row.get("applied_at")), compact=True), unsafe_allow_html=True)
+    if tracked.get("no_response_band"):
+        days = tracked.get("days_since_applied") or 0
+        st.warning(f'{tracked["no_response_band"]} sin respuesta' + (" · considerar follow-up" if days >= 7 else ""))
+        if st.button("Cerrar sin respuesta", key=f"close-no-response-{job_id}"):
+            database.set_application_stage(job_id, "CLOSED_NO_RESPONSE", note="Cierre manual sin respuesta")
+            st.rerun()
+    with st.form(f"stage-form-{job_id}"):
+        options = list(STAGE_LABELS)[1:]
+        selected = st.selectbox("Actualizar etapa", options, index=options.index(current),
+                                format_func=lambda value: STAGE_LABELS[value])
+        note = st.text_area("Nota opcional", placeholder="Sin secretos ni datos sensibles", height=80)
+        if st.form_submit_button("Guardar etapa", disabled=selected == current):
+            database.set_application_stage(job_id, selected, note=note); st.rerun()
+    with st.form(f"next-action-{job_id}"):
+        st.markdown("**Próxima acción**")
+        action_at = st.text_input("Fecha/hora ISO (vacío para limpiar)", value=row.get("next_action_at") or "",
+                                  placeholder="2026-09-05T11:00:00-03:00")
+        action_note = st.text_input("Acción", value=row.get("next_action_note") or "")
+        if st.form_submit_button("Guardar próxima acción"):
+            database.set_next_action(job_id, action_at.strip() or None, action_note); st.rerun()
+    history = database.application_history(job_id)
+    st.markdown("**Historial**")
+    if not history: st.caption("Sin eventos históricos; registro migrado sin fecha inventada.")
+    for event in history:
+        icon = "✅" if event["to_stage"] in {"APPLIED", "OFFER", "HIRED"} else "•"
+        st.markdown(f'{icon} {_display_time(event["changed_at"])} · **{STAGE_LABELS.get(event["to_stage"], event["to_stage"])}**')
+        if event.get("note"): st.caption(event["note"])
+
+
+def _render_tracking_view(database: JobDatabase) -> None:
+    st.subheader("Seguimiento")
+    rows = [tracking_row(row) for row in database.tracking_jobs()]
+    if not rows: st.info("Todavía no hay postulaciones registradas manualmente."); return
+    filters = st.columns(6)
+    selected_stage = filters[0].selectbox("Etapa", ["ALL", *list(STAGE_LABELS)[1:]],
+        format_func=lambda value: "Todas" if value == "ALL" else STAGE_LABELS[value], key="tracking-stage")
+    company = filters[1].text_input("Empresa", key="tracking-company").casefold()
+    role = filters[2].text_input("Rol", key="tracking-role").casefold()
+    source = filters[3].text_input("Fuente", key="tracking-source").casefold()
+    channel = filters[4].selectbox("Canal", ["ALL", "EMAIL", "LINK", "LINK_EMAIL", "UNKNOWN"], key="tracking-channel")
+    activity = filters[5].selectbox("Procesos", ["Todos", "Activos", "Cerrados"], key="tracking-activity")
+    dates = st.columns(2)
+    from_date = dates[0].date_input("Postuladas desde", value=None, key="tracking-from")
+    to_date = dates[1].date_input("Postuladas hasta", value=None, key="tracking-to")
+    filtered = []
+    for row in rows:
+        stage = row.get("application_stage") or "NOT_APPLIED"
+        applied = parse_datetime(row.get("applied_at")) if row.get("applied_at") else None
+        if selected_stage != "ALL" and stage != selected_stage: continue
+        if company and company not in str(row.get("company") or "").casefold(): continue
+        if role and role not in str(row.get("title") or "").casefold(): continue
+        if source and source not in str(row.get("source") or "").casefold(): continue
+        actual_channel = row.get("application_channel_used") or row.get("application_method") or "UNKNOWN"
+        if channel != "ALL" and actual_channel != channel: continue
+        if activity == "Activos" and stage not in ACTIVE_STAGES: continue
+        if activity == "Cerrados" and stage not in CLOSED_STAGES: continue
+        if from_date and (not applied or applied.date() < from_date): continue
+        if to_date and (not applied or applied.date() > to_date): continue
+        filtered.append(row)
+    st.dataframe([{"Empresa": row["company"], "Puesto": row["title"],
+        "Fecha postulación": _display_time(row.get("applied_at")) if row.get("applied_at") else "Fecha no registrada",
+        "Etapa actual": STAGE_LABELS.get(row.get("application_stage"), row.get("application_stage")),
+        "Último movimiento": _display_time(row.get("stage_updated_at") or row.get("applied_at")),
+        "Días en etapa": row.get("days_in_stage"),
+        "Próxima acción": " · ".join(filter(None, (_display_time(row.get("next_action_at")) if row.get("next_action_at") else "", row.get("next_action_note") or ""))),
+        "Fuente": row.get("source"), "Canal": row.get("application_channel_used") or row.get("application_method"),
+        "Score": float(row.get("score") or 0)} for row in filtered], hide_index=True, width="stretch")
+    st.caption(f"{len(filtered)} proceso(s) · todo el tracking permanece en SQLite local.")
+
+
+def _render_analytics_view(database: JobDatabase) -> None:
+    st.subheader("Analytics")
+    jobs = database.tracking_jobs()
+    histories = {int(row["id"]): database.application_history(int(row["id"])) for row in jobs}
+    data = analytics_snapshot(jobs, histories); kpis = data["kpis"]
+    labels = (("Postulaciones hoy", "applications_today"), ("Esta semana", "applications_week"),
+              ("Este mes", "applications_month"), ("Procesos activos", "active_processes"),
+              ("Respuestas recibidas", "responses"), ("Entrevistas", "interviews"),
+              ("Ofertas", "offers"), ("Contrataciones", "hires"))
+    for batch in (labels[:4], labels[4:]):
+        columns = st.columns(4)
+        for column, (label, key) in zip(columns, batch):
+            column.markdown(_metric_card(label, kpis[key], "status", True), unsafe_allow_html=True)
+    rates = data["rates"]; rate_columns = st.columns(4)
+    for column, (label, key) in zip(rate_columns, (("Response rate", "response_rate"),
+            ("Interview rate", "interview_rate"), ("Offer rate", "offer_rate"), ("Hire rate", "hire_rate"))):
+        column.metric(label, f'{rates[key]:.1f}%')
+    st.markdown("#### Funnel")
+    funnel_rows = [{"Etapa": key, "Vacantes": value} for key, value in data["funnel"].items()]
+    st.dataframe(funnel_rows, hide_index=True, width="stretch"); st.bar_chart(funnel_rows, x="Etapa", y="Vacantes")
+    st.markdown("#### Postulaciones por tiempo")
+    if data["daily"]: st.line_chart(data["daily"], x="date", y="applications")
+    else: st.caption("Sin fechas de postulación registradas.")
+    st.dataframe(data["weekly"], hide_index=True, width="stretch")
+    table_labels = (("Performance por rol", "by_role"), ("Performance por fuente", "by_source"),
+                    ("Performance por canal", "by_channel"), ("Performance por match score", "by_score"))
+    for label, key in table_labels:
+        st.markdown(f"#### {label}"); st.dataframe(data[key], hide_index=True, width="stretch")
+    st.markdown("#### Tiempos de respuesta")
+    timing_rows = []
+    for label, key in (("Primera respuesta", "time_to_first_response"), ("APPLIED → HR_INTERVIEW", "applied_to_hr_interview")):
+        value = data["timings"][key]
+        timing_rows.append({"Métrica": label, "Casos": value["count"], "Promedio días": value["average"],
+                            "Mediana": value["median"], "Mínimo": value["minimum"], "Máximo": value["maximum"]})
+    st.dataframe(timing_rows, hide_index=True, width="stretch")
+
 st.set_page_config(page_title="Job Hunter Agent", layout="wide")
 st.markdown("""
 <style>
@@ -290,6 +430,9 @@ font-weight:700;letter-spacing:.02em;background:#222b38;color:#e8edf4;border:1px
 .jh-apply {background:#173528;color:#8ce0ad;border-color:#2d694a}.jh-review {background:#352d16;color:#f0cf72;border-color:#6d5b24}
 .jh-reject {background:#3a1d22;color:#f09ba3;border-color:#71353d}.jh-status {background:#1d2d49;color:#a9c8ff;border-color:#365783}
 .jh-channel {background:#2b2140;color:#cdb6f4;border-color:#513f73}.jh-mode {background:#183438;color:#9bdbe0;border-color:#2d6268}
+.jh-card-stage-response {border-color:#7056a8;background:#251d38}.jh-card-stage-interview {border-color:#a87b2b;background:#302719}
+.jh-card-stage-offer {border-color:#39845b;background:#173124}.jh-card-stage-hired {border-color:#23945a;background:#10351f}
+.jh-card-stage-rejected {border-color:#91434c;background:#341d22}
 .jh-chip {display:inline-block;padding:.28rem .58rem;margin:.18rem .2rem .18rem 0;border-radius:.5rem;background:#202936;
 border:1px solid #364252;color:#e3e9f1;font-size:.82rem}div[data-testid="stExpander"] {border-color:#354050;border-radius:.65rem}
 @media (max-width:900px){.block-container{padding-left:1rem;padding-right:1rem}.jh-card{min-height:88px}.jh-card-value{font-size:1.35rem}}
@@ -331,7 +474,9 @@ overview[1].markdown(_metric_card("Próxima búsqueda", _display_time(next_run.i
 overview[2].markdown(_metric_card("Estado discovery", latest_run.get("status") if latest_run else "Sin ejecuciones", "status", True), unsafe_allow_html=True)
 overview[3].markdown(_metric_card("Total vacantes", len(all_jobs), compact=True, note=f"{database.new_since_latest_discovery()} desde último discovery"), unsafe_allow_html=True)
 
-job_hunt_tab, knowledge_tab, system_tab = st.tabs(["Job Hunt", "Knowledge Base", "System / Runs"])
+job_hunt_tab, tracking_main_tab, analytics_tab, knowledge_tab, system_tab = st.tabs(
+    ["Job Hunt", "Seguimiento", "Analytics", "Knowledge Base", "System / Runs"]
+)
 
 with job_hunt_tab:
     with st.expander("Importar vacante", expanded=False):
@@ -485,6 +630,12 @@ with job_hunt_tab:
         focus_index = next((index for index, row in enumerate(rows) if row["id"] == focus_id), 0)
         selected = choices[st.selectbox("Detalle de vacante", choice_labels, index=focus_index)]
         _render_job_detail(database, selected, master_cv_path)
+
+with tracking_main_tab:
+    _render_tracking_view(database)
+
+with analytics_tab:
+    _render_analytics_view(database)
 
 with knowledge_tab:
     st.subheader("Knowledge Base")

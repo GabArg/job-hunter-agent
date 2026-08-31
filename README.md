@@ -41,9 +41,32 @@ Levantar el dashboard:
 streamlit run app/streamlit_app.py
 ```
 
-La navegación diaria se divide en `Job Hunt`, `Knowledge Base` y `System / Runs`.
+La navegación diaria se divide en `Job Hunt`, `Seguimiento`, `Analytics`, `Knowledge Base` y `System / Runs`.
 La decisión del scorer (`APPLY/REVIEW/REJECT`) se mantiene separada del seguimiento
 operativo (`NEW`, `SHORTLISTED`, `CV_GENERATED`, `APPROVED_TO_APPLY`, `APPLIED`, `SKIPPED`).
+
+## Application Tracking & Analytics
+
+El flujo completo es `Discovery → Evaluate → CV → Apply manually → Track → Analyze`.
+`application_status` conserva el workflow operativo, mientras `application_stage` registra el proceso
+de selección (`APPLIED`, contactos, entrevistas, assessment, oferta y cierres). Una postulación,
+respuesta o entrevista sólo se registra por una acción humana explícita. Generar un CV, abrir un
+link, aprobar un email, crear un borrador o enviarlo no altera el tracking.
+
+Cada cambio agrega un evento a `application_stage_history`; las correcciones también son eventos y
+no borran la historia. El dashboard permite guardar una nota local y una próxima acción. No deben
+guardarse secretos ni datos sensibles en las notas.
+
+La vista `Seguimiento` muestra procesos activos/cerrados, días en etapa, próximas acciones y filtros.
+`Analytics` ofrece KPIs, tasas de respuesta/entrevista/oferta/contratación, funnel, series diarias y
+semanales, tiempos de respuesta y performance descriptiva por rol, fuente, canal y score. Estas
+métricas nunca modifican scoring, decisiones ni el perfil.
+
+```powershell
+job-hunter tracking-summary
+job-hunter set-stage 123 HR_INTERVIEW --note "Entrevista ficticia"
+job-hunter application-history 123
+```
 
 ### Discovery automático en Windows
 

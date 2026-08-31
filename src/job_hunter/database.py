@@ -10,6 +10,11 @@ from typing import Any
 from .models import Job
 
 APPLICATION_STATUSES = {"NEW", "SHORTLISTED", "CV_GENERATED", "APPROVED_TO_APPLY", "APPLIED", "SKIPPED"}
+APPLICATION_STAGES = {
+    "NOT_APPLIED", "APPLIED", "RECRUITER_VIEWED", "RECRUITER_CONTACT", "HR_INTERVIEW",
+    "TECH_INTERVIEW", "BUSINESS_INTERVIEW", "FINAL_INTERVIEW", "ASSESSMENT", "OFFER", "HIRED",
+    "REJECTED", "WITHDRAWN", "CLOSED_NO_RESPONSE",
+}
 
 JOBS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -29,6 +34,17 @@ CREATE TABLE IF NOT EXISTS jobs (
     email_draft_status TEXT NOT NULL DEFAULT 'NOT_GENERATED', email_sent_at TEXT,
     email_message_id TEXT, selected_application_channel TEXT, application_channel_used TEXT,
     gmail_draft_id TEXT, gmail_message_id TEXT, gmail_draft_created_at TEXT, gmail_account_email TEXT
+    ,application_stage TEXT NOT NULL DEFAULT 'NOT_APPLIED', stage_updated_at TEXT,
+    last_contact_at TEXT, next_action_at TEXT, next_action_note TEXT,
+    rejection_reason TEXT, offer_notes TEXT
+)
+"""
+APPLICATION_STAGE_HISTORY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS application_stage_history (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL,
+ from_stage TEXT NOT NULL, to_stage TEXT NOT NULL, changed_at TEXT NOT NULL,
+ note TEXT, source TEXT NOT NULL CHECK (source IN ('MANUAL','SYSTEM')),
+ FOREIGN KEY(job_id) REFERENCES jobs(id)
 )
 """
 
@@ -73,6 +89,11 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _clean_note(value: str | None) -> str | None:
+    cleaned = " ".join(str(value or "").split()).strip()
+    return cleaned[:2_000] or None
+
+
 class JobDatabase:
     def __init__(self, path: str | Path):
         self.path = Path(path); self.path.parent.mkdir(parents=True, exist_ok=True); self._initialize()
@@ -89,7 +110,7 @@ class JobDatabase:
 
     def _initialize(self) -> None:
         with self._connect() as connection:
-            connection.execute(JOBS_SCHEMA); connection.execute(RUNS_SCHEMA); connection.execute(SOURCE_METRICS_SCHEMA); connection.execute(IMPORT_HISTORY_SCHEMA); connection.execute(GMAIL_AUDIT_SCHEMA)
+            connection.execute(JOBS_SCHEMA); connection.execute(RUNS_SCHEMA); connection.execute(SOURCE_METRICS_SCHEMA); connection.execute(IMPORT_HISTORY_SCHEMA); connection.execute(GMAIL_AUDIT_SCHEMA); connection.execute(APPLICATION_STAGE_HISTORY_SCHEMA)
             columns = {row[1] for row in connection.execute("PRAGMA table_info(jobs)")}
             migrations = {
                 "published_at": "TEXT", "discovered_at": "TEXT", "application_status": "TEXT NOT NULL DEFAULT 'NEW'",
@@ -108,6 +129,9 @@ class JobDatabase:
                 "priority_fresh": "INTEGER NOT NULL DEFAULT 0",
                 "imported_manually": "INTEGER NOT NULL DEFAULT 0", "imported_at": "TEXT",
                 "import_source_url": "TEXT", "import_method": "TEXT",
+                "application_stage": "TEXT NOT NULL DEFAULT 'NOT_APPLIED'", "stage_updated_at": "TEXT",
+                "last_contact_at": "TEXT", "next_action_at": "TEXT", "next_action_note": "TEXT",
+                "rejection_reason": "TEXT", "offer_notes": "TEXT",
             }
             for name, definition in migrations.items():
                 if name not in columns: connection.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
@@ -119,6 +143,10 @@ class JobDatabase:
             connection.execute("UPDATE jobs SET application_method = COALESCE(application_method, 'UNKNOWN')")
             connection.execute("UPDATE jobs SET application_instructions = COALESCE(application_instructions, '[]')")
             connection.execute("UPDATE jobs SET email_draft_status = COALESCE(email_draft_status, 'NOT_GENERATED')")
+            connection.execute("""UPDATE jobs SET application_stage=CASE
+                WHEN application_status='APPLIED' THEN 'APPLIED' ELSE 'NOT_APPLIED' END
+                WHERE application_stage IS NULL OR application_stage='' OR
+                (application_stage='NOT_APPLIED' AND application_status='APPLIED')""")
             from .application.detector import detect_application_channel
             for row in connection.execute("SELECT id,description,url FROM jobs WHERE application_method='UNKNOWN'").fetchall():
                 detected = detect_application_channel(row["description"], row["url"])
@@ -287,8 +315,8 @@ class JobDatabase:
         timestamp = at or utc_now()
         with self._connect() as connection:
             cursor = connection.execute("""UPDATE jobs SET email_draft_status='SENT',email_sent_at=?,email_message_id=?,
-                application_status='APPLIED',applied_at=?,application_channel_used=?
-                WHERE id=? AND email_draft_status='APPROVED'""", (timestamp, message_id, timestamp, channel, job_id))
+                application_channel_used=? WHERE id=? AND email_draft_status='APPROVED'""",
+                (timestamp, message_id, channel, job_id))
             if cursor.rowcount != 1: raise ValueError("Email must be APPROVED before marking SENT")
 
     def mark_link_applied(self, job_id: int, at: str | None = None) -> None:
@@ -296,12 +324,72 @@ class JobDatabase:
         if row is None: raise KeyError(f"Job not found: {job_id}")
         if row["application_method"] not in {"LINK", "LINK_EMAIL"}: raise ValueError("LINK is not available")
         if row["application_method"] == "LINK_EMAIL" and row["selected_application_channel"] != "LINK": raise ValueError("Select LINK first")
+        self.mark_applied(job_id, channel="LINK", at=at)
+
+    def mark_applied(self, job_id: int, *, channel: str | None = None, at: str | None = None,
+                     note: str | None = None, source: str = "MANUAL") -> None:
+        if source not in {"MANUAL", "SYSTEM"}: raise ValueError("Invalid stage source")
         timestamp = at or utc_now()
         with self._connect() as connection:
-            connection.execute("UPDATE jobs SET application_status='APPLIED',applied_at=?,application_channel_used='LINK' WHERE id=?", (timestamp, job_id))
+            row = connection.execute("SELECT application_stage FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None: raise KeyError(f"Job not found: {job_id}")
+            previous = row["application_stage"] or "NOT_APPLIED"
+            connection.execute("""UPDATE jobs SET application_status='APPLIED',application_stage='APPLIED',
+                applied_at=COALESCE(applied_at,?),stage_updated_at=?,application_channel_used=COALESCE(?,application_channel_used)
+                WHERE id=?""", (timestamp, timestamp, channel, job_id))
+            if previous != "APPLIED":
+                connection.execute("""INSERT INTO application_stage_history
+                    (job_id,from_stage,to_stage,changed_at,note,source) VALUES (?,?,?,?,?,?)""",
+                    (job_id, previous, "APPLIED", timestamp, _clean_note(note), source))
+
+    def set_application_stage(self, job_id: int, stage: str, *, note: str | None = None,
+                              at: str | None = None, source: str = "MANUAL") -> None:
+        if stage not in APPLICATION_STAGES: raise ValueError(f"Invalid application stage: {stage}")
+        if source not in {"MANUAL", "SYSTEM"}: raise ValueError("Invalid stage source")
+        timestamp = at or utc_now()
+        with self._connect() as connection:
+            row = connection.execute("SELECT application_stage,application_status FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None: raise KeyError(f"Job not found: {job_id}")
+            previous = row["application_stage"] or "NOT_APPLIED"
+            if previous == stage: raise ValueError("Application stage is already set")
+            applied = stage != "NOT_APPLIED"
+            contact = stage not in {"NOT_APPLIED", "APPLIED", "RECRUITER_VIEWED"}
+            connection.execute("""UPDATE jobs SET application_stage=?,stage_updated_at=?,
+                application_status=CASE WHEN ? THEN 'APPLIED' ELSE application_status END,
+                applied_at=CASE WHEN ? THEN COALESCE(applied_at,?) ELSE applied_at END,
+                last_contact_at=CASE WHEN ? THEN ? ELSE last_contact_at END,
+                rejection_reason=CASE WHEN ?='REJECTED' AND ? IS NOT NULL THEN ? ELSE rejection_reason END,
+                offer_notes=CASE WHEN ?='OFFER' AND ? IS NOT NULL THEN ? ELSE offer_notes END WHERE id=?""",
+                (stage, timestamp, applied, applied, timestamp, contact, timestamp,
+                 stage, _clean_note(note), _clean_note(note), stage, _clean_note(note), _clean_note(note), job_id))
+            connection.execute("""INSERT INTO application_stage_history
+                (job_id,from_stage,to_stage,changed_at,note,source) VALUES (?,?,?,?,?,?)""",
+                (job_id, previous, stage, timestamp, _clean_note(note), source))
+
+    def set_next_action(self, job_id: int, at: str | None, note: str | None) -> None:
+        if at and not (note or "").strip(): raise ValueError("Next action note is required with a date")
+        with self._connect() as connection:
+            cursor = connection.execute("UPDATE jobs SET next_action_at=?,next_action_note=? WHERE id=?",
+                                        (at or None, _clean_note(note), job_id))
+            if cursor.rowcount != 1: raise KeyError(f"Job not found: {job_id}")
+
+    def application_history(self, job_id: int) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute("""SELECT * FROM application_stage_history
+                WHERE job_id=? ORDER BY changed_at,id""", (job_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def tracking_jobs(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute("""SELECT * FROM jobs WHERE application_stage!='NOT_APPLIED'
+                OR application_status='APPLIED' ORDER BY COALESCE(stage_updated_at,applied_at) DESC,id DESC""").fetchall()
+        return [dict(row) for row in rows]
 
     def set_application_status(self, job_id: int, status: str, at: str | None = None) -> None:
         if status not in APPLICATION_STATUSES: raise ValueError(f"Invalid application status: {status}")
+        if status == "APPLIED":
+            self.mark_applied(job_id, at=at)
+            return
         timestamp = at or utc_now(); assignments = ["application_status = ?"]; values: list[Any] = [status]
         if status == "CV_GENERATED":
             assignments[0] = "application_status = CASE WHEN application_status IN ('APPROVED_TO_APPLY','APPLIED') THEN application_status ELSE ? END"

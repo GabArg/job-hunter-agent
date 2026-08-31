@@ -115,13 +115,13 @@ def test_cannot_send_without_approved(tmp_path):
     with pytest.raises(ValueError, match="APPROVED"): send_approved_email(database, job_id, DummyEmailProvider(), draft)
 
 
-def test_dummy_provider_is_local_and_success_marks_sent_applied(tmp_path):
+def test_dummy_provider_is_local_and_send_still_requires_manual_applied_tracking(tmp_path):
     database, job_id, draft = setup_email_flow(tmp_path); provider = DummyEmailProvider()
     database.approve_email_draft(job_id); message_id = send_approved_email(database, job_id, provider, draft)
     row = database.get_job_row(job_id)
     assert message_id.startswith("dummy-") and provider.sent_messages == [draft]
-    assert row["email_draft_status"] == "SENT" and row["application_status"] == "APPLIED"
-    assert row["email_sent_at"] and row["applied_at"] and row["application_channel_used"] == "EMAIL"
+    assert row["email_draft_status"] == "SENT" and row["application_status"] != "APPLIED"
+    assert row["email_sent_at"] and row["applied_at"] is None and row["application_channel_used"] == "EMAIL"
 
 
 class FailingProvider(EmailProvider):
