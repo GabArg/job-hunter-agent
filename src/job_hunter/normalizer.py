@@ -16,13 +16,19 @@ SENIORITY_PATTERNS = {
     "junior": r"\b(?:junior|jr\.?)\b",
 }
 ENGLISH_PATTERNS = {
-    "c2": r"\bc2\b",
-    "c1": r"\bc1\b",
-    "fluent": r"\b(?:fluent|fluido|bilingual|bilingue)\b",
-    "advanced": r"\b(?:advanced|avanzado)\b",
-    "intermediate": r"\b(?:intermediate|intermedio|b2)\b",
-    "basic": r"\b(?:basic|basico|básico|a1|a2)\b",
+    "fluent": r"\b(?:c2|fluent|fluido|bilingual|bilingue|native|nativo)\b",
+    "advanced": r"\b(?:c1|advanced|avanzado|excellent|excelente|professional working proficiency|full professional proficiency)\b",
+    "upper-intermediate": r"\b(?:b2|upper[ -]intermediate|intermedio alto)\b",
+    "intermediate": r"\b(?:b1|intermediate|intermedio)\b",
+    "basic": r"\b(?:a1|a2|basic|basico)\b",
 }
+MANDATORY_ENGLISH_SIGNALS = (
+    "required", "mandatory", "must have", "must", "essential", "excluyente", "requisito",
+    "indispensable", "necesario", "necesaria", "obligatorio", "obligatoria",
+)
+DESIRABLE_ENGLISH_SIGNALS = (
+    "preferred", "nice to have", "desirable", "plus", "valued", "se valora", "deseable",
+)
 
 
 def clean_text(value: str) -> str:
@@ -104,11 +110,37 @@ def _extract_years(text: str) -> float | None:
 
 
 def _extract_english(text: str) -> str | None:
-    language = r"(?:ingles|inglés|english)"
+    folded = _fold(text)
+    language_matches = list(re.finditer(r"\b(?:ingles|english)\b", folded))
+    candidates: list[tuple[bool, bool, int, str]] = []
     for level, pattern in ENGLISH_PATTERNS.items():
-        if re.search(rf"{language}.{{0,30}}{pattern}|{pattern}.{{0,20}}{language}", text):
-            return level
+        for level_match in re.finditer(pattern, folded):
+            for language_match in language_matches:
+                distance = max(language_match.start(), level_match.start()) - min(language_match.end(), level_match.end())
+                if distance > 55: continue
+                start = max(0, min(language_match.start(), level_match.start()) - 45)
+                end = min(len(folded), max(language_match.end(), level_match.end()) + 45)
+                context = folded[start:end]
+                mandatory = any(_contains_term(context, signal) for signal in MANDATORY_ENGLISH_SIGNALS)
+                desirable = any(_contains_term(context, signal) for signal in DESIRABLE_ENGLISH_SIGNALS)
+                candidates.append((mandatory, desirable, start, level))
+    required = [candidate for candidate in candidates if candidate[0]]
+    if required: return required[0][3]
+    neutral = [candidate for candidate in candidates if not candidate[1]]
+    if neutral: return neutral[0][3]
     return None
+
+
+def normalize_english_level(value: str | None) -> str:
+    folded = _fold(value or "none")
+    for level, pattern in ENGLISH_PATTERNS.items():
+        if re.search(pattern, folded): return level
+    return "none" if folded in {"", "none", "ninguno"} else folded.replace(" ", "-")
+
+
+def _fold(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value.casefold())
+    return re.sub(r"\s+", " ", "".join(character for character in normalized if not unicodedata.combining(character)))
 
 
 def _contains_term(text: str, term: str) -> bool:

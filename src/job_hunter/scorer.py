@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from .models import Job, Profile, ScoreResult
+from .normalizer import normalize_english_level
 from .semantics import display_concepts, expand_candidate_capabilities, roles_match
 
-ENGLISH_RANK = {"none": 0, "basic": 1, "intermediate": 2, "advanced": 3, "fluent": 4, "c1": 4, "c2": 5}
+ENGLISH_RANK = {"none": 0, "basic": 1, "intermediate": 2, "upper-intermediate": 3, "advanced": 4, "fluent": 5}
 DEFAULT_REJECTED_SENIORITIES = {"senior", "lead", "staff", "principal"}
 EMPTY_REASON_VALUES = {"", "-", "—", "none", "n/a", "null", "no"}
 
@@ -52,9 +53,10 @@ def score_job(
     if rules.get("reject_excess_experience", True) and job.required_years is not None and job.required_years > profile.max_required_years:
         hard_rejects.append(f"Experiencia requerida ({job.required_years:g} años) supera el máximo ({profile.max_required_years:g})")
     if rules.get("reject_insufficient_english", True) and job.required_english:
-        required_rank, profile_rank = ENGLISH_RANK.get(job.required_english, 0), ENGLISH_RANK.get(profile.english_level, 0)
-        if required_rank >= ENGLISH_RANK["advanced"] and profile_rank < required_rank:
-            hard_rejects.append(f"Inglés requerido ({job.required_english}) supera el nivel del perfil ({profile.english_level})")
+        required = normalize_english_level(job.required_english)
+        candidate = normalize_english_level(profile.english_level)
+        if ENGLISH_RANK.get(required, 0) > ENGLISH_RANK.get(candidate, 0):
+            hard_rejects.append(f"Nivel de inglés requerido ({required}) supera el nivel del candidato ({candidate})")
 
     hard_rejects = normalize_reason_list(hard_rejects)
     score = round(max(0.0, min(100.0, earned / (sum(weights.values()) or 1.0) * 100)), 2)
