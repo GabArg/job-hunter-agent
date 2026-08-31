@@ -132,6 +132,7 @@ def process_job(
     result = score_job(job, profile, capability_evidence)
     job.detected_skills = list(result.matched_requirements)
     job.score, job.decision, job.reasons = result.score, result.decision, result.as_dict()
+    job.reasons["seniority_evidence"] = job.seniority_evidence
     from .application.detector import detect_application_channel
     detection = detect_application_channel(job.description, job.url, job.raw_data)
     job.application_method, job.application_email = detection.method.value, detection.email

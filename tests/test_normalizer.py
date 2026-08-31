@@ -45,3 +45,33 @@ def test_advanced_excel_is_not_advanced_english():
         description="Se requiere manejo avanzado de Excel y capacidad analítica.",
     ))
     assert job.required_english is None
+
+
+def test_seniority_uses_role_context_and_prioritizes_title():
+    cases = [
+        ("Junior Data Analyst", "Tu responsabilidad principal será construir dashboards.", "junior"),
+        ("Junior Data Analyst", "El objetivo principal es mejorar el reporting.", "junior"),
+        ("Principal Data Analyst", "Construir dashboards.", "principal"),
+        ("Data Analyst - Principal", "Construir dashboards.", "principal"),
+        ("Junior Data Analyst", "Support lead generation campaigns.", "junior"),
+        ("Lead Data Analyst", "Construir dashboards.", "lead"),
+        ("Junior Data Analyst", "Work with senior stakeholders.", "junior"),
+        ("Senior Data Analyst", "Construir dashboards.", "senior"),
+        ("Analista de Datos Junior", "La función principal será crear tableros.", "junior"),
+    ]
+    for title, description, expected in cases:
+        assert normalize_job(make_job(title=title, description=description)).seniority == expected
+
+
+def test_seniority_conflict_is_preserved_as_evidence_without_overriding_title():
+    job = normalize_job(make_job(
+        title="Junior Data Analyst",
+        description="The description explicitly says Senior Data Analyst required.",
+        raw_data={},
+    ))
+    assert job.seniority == "junior"
+    assert job.seniority_evidence == {
+        "title": "junior",
+        "description": "senior",
+        "conflict": True,
+    }

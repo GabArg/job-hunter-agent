@@ -22,6 +22,7 @@ class Job:
     required_years: float | None = None
     required_english: str | None = None
     seniority: str | None = None
+    seniority_evidence: dict[str, Any] = field(default_factory=dict)
     detected_skills: list[str] = field(default_factory=list)
     job_requirements: list[str] = field(default_factory=list)
     role_subtype: str | None = None

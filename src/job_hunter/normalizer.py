@@ -15,6 +15,11 @@ SENIORITY_PATTERNS = {
     "senior": r"\b(?:senior|sr\.?)\b",
     "junior": r"\b(?:junior|jr\.?)\b",
 }
+ROLE_PATTERN = (
+    r"(?:data\s+)?(?:analyst|analista|scientist|cientifico|cientifica|engineer|ingeniero|ingeniera|"
+    r"consultant|consultor|consultora|developer|desarrollador|desarrolladora|architect|arquitecto|"
+    r"arquitecta|specialist|especialista)"
+)
 ENGLISH_PATTERNS = {
     "fluent": r"\b(?:c2|fluent|fluido|bilingual|bilingue|native|nativo)\b",
     "advanced": r"\b(?:c1|advanced|avanzado|excellent|excelente|professional working proficiency|full professional proficiency)\b",
@@ -45,7 +50,14 @@ def normalize_job(job: Job, known_skills: list[str] | None = None) -> Job:
     job.source = clean_text(job.source)
     job.url = (job.url or "").strip()
     searchable = clean_text(f"{job.title} {job.description}")
-    job.seniority = _first_match(searchable, SENIORITY_PATTERNS)
+    title_seniority = _extract_role_seniority(job.title)
+    description_seniority = _extract_role_seniority(clean_text(job.description))
+    job.seniority = title_seniority or description_seniority
+    job.seniority_evidence = {
+        "title": title_seniority,
+        "description": description_seniority,
+        "conflict": bool(title_seniority and description_seniority and title_seniority != description_seniority),
+    }
     job.required_english = _extract_english(searchable)
     job.required_years = _extract_years(searchable)
     job.job_requirements = detect_concepts(job.description)
@@ -94,6 +106,22 @@ def _normalize_work_mode(value: Any) -> str:
 
 def _first_match(text: str, patterns: dict[str, str]) -> str | None:
     return next((name for name, pattern in patterns.items() if re.search(pattern, text)), None)
+
+
+def _extract_role_seniority(text: str) -> str | None:
+    """Extract seniority only when it is syntactically attached to a role."""
+    folded = _fold(text)
+    for name, seniority_pattern in SENIORITY_PATTERNS.items():
+        token = rf"(?:{seniority_pattern})"
+        patterns = (
+            rf"{token}(?:[ -]level)?(?:\s+\w+){{0,3}}\s+{ROLE_PATTERN}\b",
+            rf"\b{ROLE_PATTERN}\b(?:\s+(?:de|of)\s+\w+|\s+\w+){{0,3}}\s*(?:[,\-/]\s*)?{token}",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, folded)
+            if match and not (name == "lead" and re.search(r"\blead\s+generation\b", match.group())):
+                return name
+    return None
 
 
 def _extract_years(text: str) -> float | None:

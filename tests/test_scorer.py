@@ -33,6 +33,14 @@ def test_senior_fluent_five_years_is_hard_reject():
     assert len(result.hard_reject_reasons) == 3
 
 
+def test_generic_principal_in_junior_description_is_not_a_seniority_reject():
+    result = evaluate(
+        "Junior Data Analyst",
+        "Tu responsabilidad principal será construir dashboards con Power BI.",
+    )
+    assert not any("Senioridad" in reason for reason in result.hard_reject_reasons)
+
+
 def test_score_thresholds_are_respected():
     result = evaluate("Unrelated Junior", "Sin habilidades", location="Mars", mode="Onsite")
     assert result.score < 55
