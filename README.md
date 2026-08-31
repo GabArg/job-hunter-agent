@@ -44,17 +44,19 @@ This project treats that workflow as a local data product. Python services handl
 
 ## Screenshots
 
-Screenshots are intentionally not embedded until reviewed, public-safe images are versioned. This avoids broken images and accidental publication of private job-search data.
+### Job Hunt Dashboard
 
-Planned public assets:
+![Job Hunt Dashboard](docs/screenshots/dashboard.png)
 
-| View | Expected asset |
-|---|---|
-| Main dashboard and discovery summary | `docs/screenshots/dashboard.png` |
-| Job detail: technical match and eligibility | `docs/screenshots/job-detail.png` |
-| Application tracking and analytics | `docs/screenshots/tracking-analytics.png` |
+### Match vs Eligibility
 
-See [`docs/screenshots/README.md`](docs/screenshots/README.md) for the publication checklist.
+![Match vs Eligibility](docs/screenshots/job-detail.png)
+
+### Application Analytics
+
+The analytics view uses a temporary fictional SQLite dataset, clearly labeled in the screenshot; no demo records were inserted into the real database.
+
+![Application Analytics](docs/screenshots/tracking-analytics.png)
 
 ## Technical Match vs Eligibility
 
