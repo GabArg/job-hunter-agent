@@ -33,8 +33,9 @@ def test_primary_job_table_is_compact():
     table_block = SOURCE[SOURCE.index('decision_icons ='):SOURCE.index('choices = {')]
     for column in ("Puesto", "Empresa", "Score", "Decisión", "Estado", "Modalidad", "Canal", "Fecha"):
         assert f'"{column}"' in table_block
-    for secondary in ("Ubicación", "Fuente", "Sector", "Oferta"):
+    for secondary in ("Ubicación", "Sector", "Oferta"):
         assert f'"{secondary}"' not in table_block
+    assert 'view_key == "latest_discovery"' in table_block and '"Fuente"' in table_block
 
 
 def test_table_score_is_presented_as_percentage():
@@ -83,4 +84,14 @@ def test_tracking_and_analytics_use_dark_components_without_public_notes_json():
                   "Performance por rol", "Performance por fuente", "Performance por canal"):
         assert label in SOURCE
     assert "application_history" in SOURCE and "st.json(history" not in SOURCE
+
+
+def test_discovery_origin_visibility_has_kpis_filter_badges_and_latest_run_view():
+    for label in ("Descubiertas hoy", "Importadas hoy", "Importadas esta semana",
+                  "Último discovery automático", "Nuevas automáticas", "Fecha detección"):
+        assert label in SOURCE
+    for badge in ("origin-auto", "origin-manual", "origin-unknown"):
+        assert badge in SOURCE
+    assert '"Origen", ["ALL", AUTOMATIC_DISCOVERY, "MANUAL", UNKNOWN]' in SOURCE
+    assert "El último discovery se completó sin nuevas vacantes." in SOURCE
     assert '"🗑️ Descartar", key=f"skip-{job_id}", type="secondary"' in SOURCE

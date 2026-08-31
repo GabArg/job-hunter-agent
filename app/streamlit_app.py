@@ -20,6 +20,8 @@ from job_hunter.discovery.matching import parse_datetime
 from job_hunter.scorer import normalize_reason_list
 from job_hunter.semantics import display_concepts
 from job_hunter.normalizer import normalize_work_mode
+from job_hunter.origin import (AUTOMATIC_DISCOVERY, MANUAL_ORIGINS, UNKNOWN, get_job_origin,
+                               filter_jobs_by_origin, origin_label, origin_summary, was_discovered_automatically)
 from job_hunter.tracking import ACTIVE_STAGES, CLOSED_STAGES, analytics_snapshot, tracking_row
 from job_hunter.importer import (ImportStatus, import_job_from_url, import_manual_job,
                                  is_internal_job_url)
@@ -97,6 +99,13 @@ def _badge(value, kind: str = "neutral") -> str:
     return f'<span class="jh-badge jh-{kind}">{BADGE_ICONS.get(normalized, "•")} {escape(label)}</span>'
 
 
+def _origin_badge(row: dict) -> str:
+    origin = get_job_origin(row)
+    icon = "🔎" if origin == AUTOMATIC_DISCOVERY else "📥" if origin in MANUAL_ORIGINS else "❔"
+    kind = "origin-auto" if origin == AUTOMATIC_DISCOVERY else "origin-manual" if origin in MANUAL_ORIGINS else "origin-unknown"
+    return f'<span class="jh-badge jh-{kind}">{icon} {escape(origin_label(origin))}</span>'
+
+
 def _badge_row(*values: tuple[object, str]) -> None:
     st.markdown(" ".join(_badge(value, kind) for value, kind in values), unsafe_allow_html=True)
 
@@ -140,6 +149,9 @@ def _render_job_detail(database: JobDatabase, row: dict, master_cv_path: str) ->
     _badge_row((row["decision"], str(row["decision"]).lower()),
                (status, "status"), (row.get("application_method"), "channel"),
                (_display_work_mode(row["work_mode"], row["description"]), "mode"))
+    st.markdown(_origin_badge(row), unsafe_allow_html=True)
+    if get_job_origin(row) in MANUAL_ORIGINS and was_discovered_automatically(row):
+        st.caption("Importada inicialmente por el usuario y encontrada posteriormente por discovery.")
     metadata = st.columns(4)
     metadata[0].caption(f"📍 {row.get('location') or 'Ubicación no informada'}")
     metadata[1].caption(f"🏷️ {row.get('sector') or 'Other'}")
@@ -430,6 +442,8 @@ font-weight:700;letter-spacing:.02em;background:#222b38;color:#e8edf4;border:1px
 .jh-apply {background:#173528;color:#8ce0ad;border-color:#2d694a}.jh-review {background:#352d16;color:#f0cf72;border-color:#6d5b24}
 .jh-reject {background:#3a1d22;color:#f09ba3;border-color:#71353d}.jh-status {background:#1d2d49;color:#a9c8ff;border-color:#365783}
 .jh-channel {background:#2b2140;color:#cdb6f4;border-color:#513f73}.jh-mode {background:#183438;color:#9bdbe0;border-color:#2d6268}
+.jh-origin-auto {background:#17342d;color:#92e0c2;border-color:#2f725d}.jh-origin-manual {background:#2c2440;color:#d0bdf5;border-color:#59477d}
+.jh-origin-unknown {background:#302f34;color:#c8c7cc;border-color:#56545d}
 .jh-card-stage-response {border-color:#7056a8;background:#251d38}.jh-card-stage-interview {border-color:#a87b2b;background:#302719}
 .jh-card-stage-offer {border-color:#39845b;background:#173124}.jh-card-stage-hired {border-color:#23945a;background:#10351f}
 .jh-card-stage-rejected {border-color:#91434c;background:#341d22}
@@ -461,18 +475,32 @@ latest_run = database.latest_discovery_run()
 next_run = next_schedule_time(schedule.get("times", [])) if schedule.get("enabled", True) else None
 counts = database.dashboard_counts()
 all_jobs = database.list_jobs()
+origins = origin_summary(all_jobs)
 
-top = st.columns(5)
+top = st.columns(6)
 for column, label, value, tone in zip(top,
-    ("Nuevas hoy", "Recomendadas", "En revisión", "Postuladas", "CVs generados"),
-    (counts["new_today"], counts["recommended"], counts["review"], counts["applied"], counts["cvs"]),
-    ("status", "apply", "review", "status", "status")):
+    ("Descubiertas hoy", "Importadas hoy", "Recomendadas", "En revisión", "Postuladas", "CVs generados"),
+    (counts["discovered_today"], counts["imported_today"], counts["recommended"], counts["review"], counts["applied"], counts["cvs"]),
+    ("status", "stage-response", "apply", "review", "status", "status")):
     column.markdown(_metric_card(label, value, tone), unsafe_allow_html=True)
 overview = st.columns(4)
 overview[0].markdown(_metric_card("Última búsqueda", _display_time(latest_run.get("finished_at")) if latest_run else "Sin ejecuciones", compact=True), unsafe_allow_html=True)
 overview[1].markdown(_metric_card("Próxima búsqueda", _display_time(next_run.isoformat()) if next_run else "Desactivada", compact=True), unsafe_allow_html=True)
 overview[2].markdown(_metric_card("Estado discovery", latest_run.get("status") if latest_run else "Sin ejecuciones", "status", True), unsafe_allow_html=True)
 overview[3].markdown(_metric_card("Total vacantes", len(all_jobs), compact=True, note=f"{database.new_since_latest_discovery()} desde último discovery"), unsafe_allow_html=True)
+if latest_run:
+    with st.expander("Último discovery automático", expanded=True):
+        run_cards = st.columns(4)
+        run_cards[0].markdown(_metric_card("Finalizó", _display_time(latest_run.get("finished_at")), compact=True), unsafe_allow_html=True)
+        run_cards[1].markdown(_metric_card("Estado", latest_run.get("status"), "status", True), unsafe_allow_html=True)
+        run_cards[2].markdown(_metric_card("Vacantes obtenidas", latest_run.get("preliminary", 0), compact=True), unsafe_allow_html=True)
+        run_cards[3].markdown(_metric_card("Nuevas automáticas", latest_run.get("new_jobs", 0), compact=True), unsafe_allow_html=True)
+        st.caption("Fuentes consultadas: " + ", ".join(json.loads(latest_run.get("sources") or "[]")))
+        st.dataframe([{"Actualizadas": latest_run.get("updated_jobs", 0), "Duplicadas": latest_run.get("duplicates", 0),
+                       "APPLY": latest_run.get("apply_count", 0), "REVIEW": latest_run.get("review_count", 0),
+                       "REJECT": latest_run.get("reject_count", 0),
+                       "Errores": "Sí" if latest_run.get("errors") not in {None, "", "{}", "[]"} else "No"}],
+                     hide_index=True, width="stretch")
 
 job_hunt_tab, tracking_main_tab, analytics_tab, knowledge_tab, system_tab = st.tabs(
     ["Job Hunt", "Seguimiento", "Analytics", "Knowledge Base", "System / Runs"]
@@ -578,11 +606,12 @@ with job_hunt_tab:
         for column, key in zip(discovery_metrics, ("Nuevas", "Actualizadas", "Duplicadas", "APPLY", "REVIEW", "REJECT")):
             column.markdown(_metric_card(key, discovery_summary[key], key.lower() if key in {"APPLY", "REVIEW", "REJECT"} else "neutral", True), unsafe_allow_html=True)
 
-    view_labels = {"Nuevas hoy": "today", "Recomendadas": "recommended", "En revisión": "review",
+    view_labels = {"Último discovery": "latest_discovery", "Nuevas hoy": "today", "Recomendadas": "recommended", "En revisión": "review",
                    "CVs generados": "cvs", "Postuladas": "applied", "Descartadas": "discarded"}
     selected_view = st.radio("Vista", list(view_labels), horizontal=True)
-    rows = database.list_jobs(view_labels[selected_view], "All")
-    filter_columns = st.columns(5)
+    view_key = view_labels[selected_view]
+    rows = database.latest_discovery_jobs() if view_key == "latest_discovery" else database.list_jobs(view_key, "All")
+    filter_columns = st.columns(6)
     selected_decision = filter_columns[0].selectbox(
         "Decisión", ["ALL", "APPLY", "REVIEW", "REJECT"],
         format_func=lambda value: "Todas" if value == "ALL" else _display_decision(value),
@@ -602,26 +631,38 @@ with job_hunt_tab:
     selected_channel = filter_columns[4].selectbox(
         "Canal", channels, format_func=lambda value: "Todos" if value == "ALL" else _display_method(value),
     )
+    selected_origin = filter_columns[5].selectbox(
+        "Origen", ["ALL", AUTOMATIC_DISCOVERY, "MANUAL", UNKNOWN],
+        format_func=lambda value: {"ALL": "Todos", AUTOMATIC_DISCOVERY: "Discovery automático",
+                                   "MANUAL": "Importadas manualmente", UNKNOWN: "Origen no determinado"}[value],
+    )
     rows = [row for row in rows
             if (selected_decision == "ALL" or row.get("decision") == selected_decision)
             and (selected_status == "ALL" or row.get("application_status") == selected_status)
             and (selected_mode == "ALL" or normalize_work_mode(row.get("work_mode"), row.get("description", "")) == selected_mode)
             and (selected_sector == "All" or (row.get("sector") or "Other") == selected_sector)
             and (selected_channel == "ALL" or (row.get("application_method") or "UNKNOWN") == selected_channel)]
+    rows = filter_jobs_by_origin(rows, selected_origin)
     search = st.text_input("Buscar empresa o puesto", key="job_search").strip().casefold()
     rows = [row for row in rows if not search or search in str(row["company"]).casefold() or search in str(row["title"]).casefold()]
     if not rows:
-        st.info("No hay ofertas en esta vista.")
+        st.info("El último discovery se completó sin nuevas vacantes." if view_key == "latest_discovery"
+                else "No hay ofertas en esta vista.")
     else:
         decision_icons = {"APPLY": "✅ Aplicar", "REVIEW": "🟡 Revisar", "REJECT": "🔴 Rechazar"}
         method_icons = {"LINK": "🔗 Link", "EMAIL": "✉️ Email", "LINK_EMAIL": "🔗+✉️ Link + Email", "UNKNOWN": "❔ No detectado"}
-        st.dataframe([{"Puesto": row["title"], "Empresa": row["company"],
-                       "Score": f'{float(row.get("score") or 0):.0f}%', "Decisión": decision_icons.get(row["decision"], _display_decision(row["decision"])),
-                       "Estado": _display_status(row["application_status"]),
-                       "Modalidad": _display_work_mode(row["work_mode"], row["description"]),
-                       "Canal": method_icons.get(row.get("application_channel_used") or row.get("application_method"), "❔ No detectado"),
-                       "Fecha": _display_time(row.get("published_at") or row["first_seen_at"])}
-                      for row in rows], hide_index=True, width="stretch", height=min(460, 42 + len(rows) * 36),
+        table_rows = ([{"Puesto": row["title"], "Empresa": row["company"],
+                        "Score": f'{float(row.get("score") or 0):.0f}%', "Decisión": decision_icons.get(row["decision"], _display_decision(row["decision"])),
+                        "Modalidad": _display_work_mode(row["work_mode"], row["description"]),
+                        "Fuente": row.get("source") or "—", "Fecha detección": _display_time(row["first_seen_at"])} for row in rows]
+                      if view_key == "latest_discovery" else
+                      [{"Puesto": row["title"], "Empresa": row["company"],
+                        "Score": f'{float(row.get("score") or 0):.0f}%', "Decisión": decision_icons.get(row["decision"], _display_decision(row["decision"])),
+                        "Estado": _display_status(row["application_status"]),
+                        "Modalidad": _display_work_mode(row["work_mode"], row["description"]),
+                        "Canal": method_icons.get(row.get("application_channel_used") or row.get("application_method"), "❔ No detectado"),
+                        "Fecha": _display_time(row.get("published_at") or row["first_seen_at"])} for row in rows])
+        st.dataframe(table_rows, hide_index=True, width="stretch", height=min(460, 42 + len(rows) * 36),
                      column_config={"Puesto": st.column_config.TextColumn(width="large"),
                                     "Empresa": st.column_config.TextColumn(width="medium")})
         choices = {f'#{row["id"]} · {_display_decision(row["decision"])} · {row["company"]} · {row["title"]}': row for row in rows}
@@ -696,9 +737,9 @@ with system_tab:
     st.caption(f"Fuentes: {', '.join(source_names) or 'Ninguna'} · Horarios: {', '.join(schedule.get('times', [])) if schedule.get('enabled', True) else 'Desactivados'}")
     st.caption("Scheduler de Windows: scripts preparados; estado no consultado para evitar requerir privilegios.")
     if runs:
-        st.dataframe([{"ID": run["id"], "Inicio": _display_time(run["started_at"]), "Fin": _display_time(run["finished_at"]),
+        st.dataframe([{"Run": run["id"], "Inicio": _display_time(run["started_at"]), "Fin": _display_time(run["finished_at"]),
                        "Estado": run["status"], "Fuentes": run["sources"], "Preliminares": run["preliminary"],
-                       "Nuevas": run["new_jobs"], "Actualizadas": run["updated_jobs"], "Duplicadas": run["duplicates"],
+                       "Nuevas automáticas": run["new_jobs"], "Actualizadas": run["updated_jobs"], "Duplicadas": run["duplicates"],
                        "APPLY": run["apply_count"], "REVIEW": run["review_count"], "REJECT": run["reject_count"],
                        "Errores": "⚠️ Sí" if run["errors"] not in {None, "", "{}", "[]"} else "—"} for run in runs], hide_index=True, width="stretch")
         with st.expander("Errores y payloads de runs", expanded=False):
@@ -706,6 +747,9 @@ with system_tab:
                 if run["errors"] not in {None, "", "{}", "[]"}: st.code(f'Run #{run["id"]}: {run["errors"]}')
     else: st.info("Aún no hay ejecuciones registradas.")
     st.subheader("Importaciones manuales")
+    import_cards = st.columns(2)
+    import_cards[0].markdown(_metric_card("Importadas hoy", origins["manual_today"], "stage-response", True), unsafe_allow_html=True)
+    import_cards[1].markdown(_metric_card("Importadas esta semana", origins["manual_week"], compact=True), unsafe_allow_html=True)
     imports = database.list_import_history()
     if imports:
         st.dataframe([{"Fecha": _display_time(row["imported_at"]), "Empresa": row["company"],

@@ -409,7 +409,12 @@ class JobDatabase:
               SUM(application_status='CV_GENERATED') AS cvs,
               SUM(application_status='APPLIED') AS applied,
               SUM(decision='REJECT' OR application_status='SKIPPED') AS discarded FROM jobs""").fetchone()
-        return {key: int(row[key] or 0) for key in row.keys()}
+        counts = {key: int(row[key] or 0) for key in row.keys()}
+        from .origin import origin_summary
+        origin = origin_summary(self.list_jobs())
+        counts.update({"discovered_today": origin["automatic_today"], "imported_today": origin["manual_today"],
+                       "imported_week": origin["manual_week"]})
+        return counts
 
     def create_discovery_run(self, sources: list[str], started_at: str | None = None) -> int:
         with self._connect() as connection:
@@ -434,12 +439,12 @@ class JobDatabase:
     def latest_discovery_run(self) -> dict[str, Any] | None:
         rows = self.list_discovery_runs(1); return rows[0] if rows else None
 
+    def latest_discovery_jobs(self) -> list[dict[str, Any]]:
+        from .origin import jobs_created_by_run
+        return jobs_created_by_run(self.list_jobs(), self.latest_discovery_run())
+
     def new_since_latest_discovery(self) -> int:
-        latest = self.latest_discovery_run()
-        if not latest: return 0
-        with self._connect() as connection:
-            row = connection.execute("SELECT COUNT(*) count FROM jobs WHERE first_seen_at >= ?", (latest["started_at"],)).fetchone()
-        return int(row["count"])
+        return len(self.latest_discovery_jobs())
 
     def record_source_metric(self, *, run_id: int | None, source: str, target: str | None, sector: str,
                              fetched: int, relevant_by_title: int, relevant_after_description: int,
