@@ -5,7 +5,7 @@ import unicodedata
 from typing import Any
 
 from .models import Job
-from .semantics import canonicalize_terms, detect_concepts, detect_roles
+from .semantics import canonicalize_terms, classify_requirement_concepts, detect_concepts, detect_roles
 
 SENIORITY_PATTERNS = {
     "principal": r"\bprincipal\b",
@@ -18,7 +18,7 @@ SENIORITY_PATTERNS = {
 ROLE_PATTERN = (
     r"(?:data\s+)?(?:analyst|analista|scientist|cientifico|cientifica|engineer|ingeniero|ingeniera|"
     r"consultant|consultor|consultora|developer|desarrollador|desarrolladora|architect|arquitecto|"
-    r"arquitecta|specialist|especialista)"
+    r"arquitecta|specialist|especialista|analytics)"
 )
 ENGLISH_PATTERNS = {
     "fluent": r"\b(?:c2|fluent|fluido|bilingual|bilingue|native|nativo)\b",
@@ -61,6 +61,7 @@ def normalize_job(job: Job, known_skills: list[str] | None = None) -> Job:
     job.required_english = _extract_english(searchable)
     job.required_years = _extract_years(searchable)
     job.job_requirements = detect_concepts(job.description)
+    job.mandatory_requirements, job.desirable_requirements = classify_requirement_concepts(job.description)
     candidate_concepts = canonicalize_terms(known_skills or [])
     job.detected_skills = [concept for concept in job.job_requirements if concept in candidate_concepts]
     roles = detect_roles(job.title, job.description)
@@ -146,9 +147,9 @@ def _extract_english(text: str) -> str | None:
             for language_match in language_matches:
                 distance = max(language_match.start(), level_match.start()) - min(language_match.end(), level_match.end())
                 if distance > 55: continue
-                start = max(0, min(language_match.start(), level_match.start()) - 45)
-                end = min(len(folded), max(language_match.end(), level_match.end()) + 45)
-                context = folded[start:end]
+                evidence_start = min(language_match.start(), level_match.start())
+                evidence_end = max(language_match.end(), level_match.end())
+                start, end, context = _sentence_context(folded, evidence_start, evidence_end, 45)
                 mandatory = any(_contains_term(context, signal) for signal in MANDATORY_ENGLISH_SIGNALS)
                 desirable = any(_contains_term(context, signal) for signal in DESIRABLE_ENGLISH_SIGNALS)
                 candidates.append((mandatory, desirable, start, level))
@@ -164,6 +165,18 @@ def normalize_english_level(value: str | None) -> str:
     for level, pattern in ENGLISH_PATTERNS.items():
         if re.search(pattern, folded): return level
     return "none" if folded in {"", "none", "ninguno"} else folded.replace(" ", "-")
+
+
+def _sentence_context(text: str, evidence_start: int, evidence_end: int, radius: int) -> tuple[int, int, str]:
+    start = max(0, evidence_start - radius)
+    end = min(len(text), evidence_end + radius)
+    preceding = max(text.rfind(mark, start, evidence_start) for mark in (".", ";", "\n"))
+    if preceding >= 0:
+        start = preceding + 1
+    following = [position for mark in (".", ";", "\n") if (position := text.find(mark, evidence_end, end)) >= 0]
+    if following:
+        end = min(following)
+    return start, end, text[start:end]
 
 
 def _fold(value: str) -> str:

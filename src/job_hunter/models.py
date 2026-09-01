@@ -23,6 +23,8 @@ class Job:
     required_english: str | None = None
     seniority: str | None = None
     seniority_evidence: dict[str, Any] = field(default_factory=dict)
+    mandatory_requirements: list[str] = field(default_factory=list)
+    desirable_requirements: list[str] = field(default_factory=list)
     detected_skills: list[str] = field(default_factory=list)
     job_requirements: list[str] = field(default_factory=list)
     role_subtype: str | None = None
@@ -90,6 +92,7 @@ class ScoreResult:
     candidate_skills: list[str] = field(default_factory=list)
     target_profile_terms: list[str] = field(default_factory=list)
     matched_requirement_evidence: dict[str, list[str]] = field(default_factory=dict)
+    mandatory_missing_requirements: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -106,4 +109,5 @@ class ScoreResult:
             "candidate_capabilities": self.candidate_skills,
             "target_profile_terms": self.target_profile_terms,
             "matched_requirement_evidence": self.matched_requirement_evidence,
+            "mandatory_missing_requirements": self.mandatory_missing_requirements,
         }

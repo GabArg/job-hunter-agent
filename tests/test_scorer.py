@@ -41,6 +41,41 @@ def test_generic_principal_in_junior_description_is_not_a_seniority_reject():
     assert not any("Senioridad" in reason for reason in result.hard_reject_reasons)
 
 
+def test_missing_exclusive_domo_is_a_hard_reject():
+    result = evaluate("Data Analyst", "Experiencia sólida con Domo (requisito excluyente).")
+    assert result.mandatory_missing_requirements == ["domo"]
+    assert "Requisito excluyente faltante: Domo" in result.hard_reject_reasons
+
+
+def test_desirable_or_plus_skill_is_not_a_hard_reject():
+    python_result = evaluate("Data Analyst", "Python será un plus.")
+    domo_result = evaluate("Data Analyst", "Domo deseable.")
+    assert python_result.mandatory_missing_requirements == []
+    assert domo_result.mandatory_missing_requirements == []
+    assert not any("Requisito excluyente faltante" in reason for reason in python_result.hard_reject_reasons)
+    assert not any("Requisito excluyente faltante" in reason for reason in domo_result.hard_reject_reasons)
+
+
+def test_job_52_signals_reject_for_real_requirements_not_lead_seniority():
+    job = Job(
+        "Data Analyst", "Ruth Leytes", "Argentina", "Remote",
+        "+2 años de experiencia en Data Analytics o Business Intelligence. "
+        "Experiencia sólida y práctica con Domo (requisito excluyente). SQL. "
+        "Nivel de inglés C1. APIs, ETL y Python será un plus. "
+        "Datos de marketing o intake como CallRail o Lead Docket será un plus.",
+        "manual", "manual://52",
+    )
+    normalized = normalize_job(job, PROFILE.skills)
+    result = score_job(normalized, PROFILE)
+    assert normalized.seniority != "lead"
+    assert normalized.required_english == "advanced"
+    assert normalized.required_years == 2
+    assert result.decision == "REJECT"
+    assert result.mandatory_missing_requirements == ["domo"]
+    assert not any("Senioridad" in reason for reason in result.hard_reject_reasons)
+    assert any("inglés requerido (advanced)" in reason for reason in result.hard_reject_reasons)
+
+
 def test_score_thresholds_are_respected():
     result = evaluate("Unrelated Junior", "Sin habilidades", location="Mars", mode="Onsite")
     assert result.score < 55

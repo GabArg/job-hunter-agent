@@ -75,3 +75,35 @@ def test_seniority_conflict_is_preserved_as_evidence_without_overriding_title():
         "description": "senior",
         "conflict": True,
     }
+
+
+def test_product_and_platform_names_do_not_imply_lead_seniority():
+    platforms = "Lead Docket, CallRail, Filevine, SmartAdvocate, Neos, CloudLex y HubSpot"
+    job = normalize_job(make_job(
+        title="Data Analyst",
+        description=f"Experiencia con datos de marketing o intake, como {platforms}.",
+    ))
+    assert job.seniority != "lead"
+
+
+def test_lead_is_only_extracted_when_attached_to_a_role():
+    positives = ("Lead Data Analyst", "Data Analyst - Lead", "Lead BI Analyst", "Lead Data Engineer", "Analytics Lead")
+    for title in positives:
+        assert normalize_job(make_job(title=title, description="SQL")).seniority == "lead"
+
+    negatives = ("lead generation", "lead scoring", "sales leads", "lead source", "lead management")
+    for phrase in negatives:
+        assert normalize_job(make_job(title="Data Analyst", description=phrase)).seniority != "lead"
+
+
+def test_c1_english_is_canonicalized_as_advanced():
+    job = normalize_job(make_job(title="Data Analyst", description="Nivel de inglés C1 obligatorio."))
+    assert job.required_english == "advanced"
+
+
+def test_c1_is_not_made_desirable_by_plus_in_the_next_sentence():
+    job = normalize_job(make_job(
+        title="Data Analyst",
+        description="Nivel de inglés C1. Será un plus contar con experiencia en APIs y Python.",
+    ))
+    assert job.required_english == "advanced"

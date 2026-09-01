@@ -40,6 +40,7 @@ CONCEPT_ALIASES: dict[str, tuple[str, ...]] = {
     "apis": ("api", "apis", "rest api", "apis rest"), "n8n": ("n8n",),
     "ai-agents": ("ai agents", "agentes de ia", "agentes ia"), "chatbots": ("chatbot", "chatbots"),
     "tableau": ("tableau",), "snowflake": ("snowflake",), "dbt": ("dbt",),
+    "domo": ("domo",),
 }
 
 ROLE_ALIASES: dict[str, tuple[str, ...]] = {
@@ -54,8 +55,15 @@ ROLE_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 DISPLAY_NAMES = {concept: concept.replace("-", " ").title() for concept in CONCEPT_ALIASES}
-DISPLAY_NAMES.update({"uml": "UML", "sql": "SQL", "apis": "APIs", "power-bi": "Power BI", "product-owner": "Product Owner"})
+DISPLAY_NAMES.update({"uml": "UML", "sql": "SQL", "apis": "APIs", "power-bi": "Power BI", "product-owner": "Product Owner", "domo": "Domo"})
 CAPABILITY_IMPLICATIONS = {"business-analysis": {"requirements", "stakeholders"}}
+MANDATORY_SIGNALS = (
+    "requisito excluyente", "excluyente", "obligatorio", "obligatoria", "indispensable",
+    "imprescindible", "must have", "required", "mandatory", "essential",
+)
+DESIRABLE_SIGNALS = (
+    "sera un plus", "es un plus", "deseable", "preferred", "nice to have", "bonus", "se valora",
+)
 
 
 def normalize_semantic_text(value: str) -> str:
@@ -67,6 +75,51 @@ def normalize_semantic_text(value: str) -> str:
 def detect_concepts(text: str, catalog: dict[str, tuple[str, ...]] = CONCEPT_ALIASES) -> list[str]:
     normalized = normalize_semantic_text(text)
     return [concept for concept, aliases in catalog.items() if any(_phrase(normalized, alias) for alias in aliases)]
+
+
+def classify_requirement_concepts(text: str) -> tuple[list[str], list[str]]:
+    """Classify known concepts from local clauses; signals never create concepts themselves."""
+    mandatory: list[str] = []
+    desirable: list[str] = []
+    normalized = normalize_semantic_text(text)
+    for clause in re.split(r"[.;,|]", normalized):
+        concepts = detect_concepts(clause)
+        if not concepts:
+            continue
+        mandatory_positions = _signal_positions(clause, MANDATORY_SIGNALS)
+        desirable_positions = _signal_positions(clause, DESIRABLE_SIGNALS)
+        for concept in concepts:
+            concept_positions = [
+                match.start()
+                for alias in CONCEPT_ALIASES[concept]
+                for match in re.finditer(
+                    rf"(?<![a-z0-9]){re.escape(normalize_semantic_text(alias))}(?![a-z0-9])", clause
+                )
+            ]
+            mandatory_distance = _nearest_distance(concept_positions, mandatory_positions)
+            desirable_distance = _nearest_distance(concept_positions, desirable_positions)
+            if mandatory_distance is not None and mandatory_distance <= 90 and (
+                desirable_distance is None or mandatory_distance < desirable_distance
+            ):
+                if concept not in mandatory:
+                    mandatory.append(concept)
+            elif desirable_distance is not None and desirable_distance <= 90 and concept not in desirable:
+                desirable.append(concept)
+    return mandatory, desirable
+
+
+def _signal_positions(text: str, signals: tuple[str, ...]) -> list[int]:
+    return [
+        match.start()
+        for signal in signals
+        for match in re.finditer(
+            rf"(?<![a-z0-9]){re.escape(normalize_semantic_text(signal))}(?![a-z0-9])", text
+        )
+    ]
+
+
+def _nearest_distance(left: list[int], right: list[int]) -> int | None:
+    return min((abs(a - b) for a in left for b in right), default=None)
 
 
 def canonicalize_terms(values: Iterable[str]) -> set[str]:

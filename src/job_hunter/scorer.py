@@ -31,6 +31,7 @@ def score_job(
     candidate_skills = set(capability_evidence)
     matched = [concept for concept in requirements if concept in candidate_skills]
     missing = [concept for concept in requirements if concept not in candidate_skills]
+    mandatory_missing = [concept for concept in job.mandatory_requirements if concept not in candidate_skills]
     # Only requirements present in the offer participate in this component. Profile targets never become gaps.
     skill_ratio = len(matched) / len(requirements) if requirements else 0.0
     earned += weights.get("skills", 0) * skill_ratio
@@ -50,6 +51,11 @@ def score_job(
     rules = profile.hard_reject_rules
     if rules.get("reject_unlisted_seniority", True) and job.seniority in DEFAULT_REJECTED_SENIORITIES and job.seniority not in profile.allowed_seniority:
         hard_rejects.append(f"Senioridad no permitida: {job.seniority}")
+    if rules.get("reject_missing_mandatory_requirements", True):
+        hard_rejects.extend(
+            f"Requisito excluyente faltante: {name}"
+            for name in display_concepts(mandatory_missing)
+        )
     if rules.get("reject_excess_experience", True) and job.required_years is not None and job.required_years > profile.max_required_years:
         hard_rejects.append(f"Experiencia requerida ({job.required_years:g} años) supera el máximo ({profile.max_required_years:g})")
     if rules.get("reject_insufficient_english", True) and job.required_english:
@@ -64,7 +70,7 @@ def score_job(
     target_terms = list(dict.fromkeys([*profile.target_roles, *profile.skills]))
     matched_evidence = {concept: capability_evidence[concept] for concept in matched}
     return ScoreResult(score, decision, matched, missing, hard_rejects, positive, requirements, matched,
-                       sorted(candidate_skills), target_terms, matched_evidence)
+                       sorted(candidate_skills), target_terms, matched_evidence, mandatory_missing)
 
 
 def normalize_reason_list(values) -> list[str]:
