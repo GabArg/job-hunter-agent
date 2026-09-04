@@ -1,48 +1,319 @@
-# Job Hunter Agent
+<div align="center">
 
-**Local job-search automation with factual CV adaptation, eligibility checks, and human-in-the-loop application tracking.**
+# 🔎 Job Hunter Agent
 
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
-![SQLite](https://img.shields.io/badge/Storage-SQLite-003B57?logo=sqlite&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-330%2B_local-brightgreen)
-![Human in the loop](https://img.shields.io/badge/design-human--in--the--loop-6f42c1)
+### Local-First Job Search Automation with Factual CV Adaptation & Human-in-the-Loop Control
 
-Job Hunter Agent is a local-first system for organizing and automating a job search without giving up human control. It combines public-source discovery, manual imports, requirement-aware evaluation, evidence-constrained CV generation, approval-gated Gmail drafts, application tracking, and conversion analytics in one Streamlit dashboard.
+**Python · Streamlit · SQLite · Automation · Gmail Drafts · Analytics**
 
-- Discover jobs from multiple public APIs, ATS feeds, and structured career pages.
-- Normalize, deduplicate, and evaluate requirements separately from eligibility.
-- Generate role-aware, ATS-friendly CVs using factual evidence only.
-- Detect application channels and prepare Gmail drafts behind explicit approval.
-- Track application stages, next actions, and immutable transition history.
-- Analyze response, interview, offer, and hire conversion without changing scoring decisions.
+</div>
 
-> The main documentation is currently in English for portfolio use. Spanish documentation may be added later.
+---
 
-## Contents
+## 🎯 Executive Summary
 
-- [Why this project exists](#why-this-project-exists)
-- [Screenshots](#screenshots)
-- [Technical Match vs Eligibility](#technical-match-vs-eligibility)
-- [Human-in-the-loop by design](#human-in-the-loop-by-design)
-- [Features](#features)
-- [Architecture](#architecture)
-- [Factual CV architecture](#factual-cv-architecture)
-- [Workflow](#workflow)
-- [Quick Start](#quick-start)
-- [Scheduler](#scheduler)
-- [Privacy & Security](#privacy--security)
-- [Project Structure](#project-structure)
-- [Current Status](#current-status)
-- [Roadmap](#roadmap)
+**Job Hunter Agent** is a local-first data product for managing and automating a modern job search without giving up human control.
 
-## Why this project exists
+It combines public-source discovery, requirement-aware evaluation, factual CV adaptation, approval-gated Gmail drafts, application tracking and conversion analytics in one workflow.
 
-A real job search is a data workflow: opportunities arrive from heterogeneous sources, descriptions use inconsistent terminology, eligibility constraints can override a strong technical match, and every application creates follow-up state.
+The project treats job hunting as a structured data problem:
 
-This project treats that workflow as a local data product. Python services handle ingestion, normalization, semantic matching, scoring, document generation, OAuth integration, and analytics; Streamlit provides an operational UI; SQLite preserves auditable state. The result is automation where it is useful and explicit approval where judgment matters.
+> **discover → normalize → evaluate → prepare → approve → apply → track → learn**
 
-## Screenshots
+The goal is not to auto-apply everywhere. The goal is to automate repetitive work while keeping sensitive or judgment-heavy decisions explicitly human.
+
+---
+
+## 📊 Portfolio Highlights
+
+| Capability | Result |
+|---|---:|
+| 🧪 Automated tests | **330+ local tests** |
+| 🌐 Discovery | **Multiple public APIs, ATS feeds & career pages** |
+| 📄 CV generation | **ATS-friendly, factual, max 2 pages** |
+| 🧠 Decision model | **Technical match separated from eligibility** |
+| ✉️ Gmail integration | **Approval-gated draft creation** |
+| 📈 Tracking | **Stage history + funnel + conversion analytics** |
+| 🔐 Privacy model | **Local-first, private runtime data ignored by Git** |
+
+---
+
+## 🧩 What the Product Does
+
+Job Hunter Agent connects the full application workflow:
+
+- discovers jobs from multiple public sources,
+- normalizes and deduplicates opportunities,
+- evaluates technical fit and hard eligibility separately,
+- generates role-aware CVs from verified facts only,
+- detects application channels,
+- prepares Gmail drafts behind explicit approval,
+- tracks recruitment stages and next actions,
+- measures response, interview, offer and hire conversion.
+
+It is designed as an operational system, not just a scraper or scoring notebook.
+
+---
+
+## 🧠 Match vs Eligibility
+
+A key design choice is to keep **technical fit** and **eligibility** separate.
+
+A role can be a strong technical match and still be a bad application target.
+
+```text
+Technical match: 85%
+Eligibility:      REJECT
+Reason:           Advanced English required
+```
+
+This distinction prevents a misleading score from hiding hard constraints.
+
+### Current eligibility checks include
+
+- unsupported seniority,
+- excessive required years of experience,
+- English above the configured factual level,
+- explicit geography or location constraints.
+
+The final decision can be:
+
+```text
+APPLY
+REVIEW
+REJECT
+```
+
+while the technical score remains visible and explainable.
+
+---
+
+## 👤 Human-in-the-Loop by Design
+
+This project intentionally **does not** remove the user from high-impact decisions.
+
+The system does not:
+
+- submit job applications automatically,
+- invent experience or achievements,
+- inflate English level,
+- mark a job as applied because a link was opened,
+- change tracking stages silently,
+- send Gmail messages.
+
+The user explicitly reviews or approves:
+
+- generated CVs,
+- email content,
+- Gmail draft creation,
+- application submission state,
+- recruitment-stage changes.
+
+> Human approval is a product requirement, not a missing feature.
+
+---
+
+## 🔄 End-to-End Workflow
+
+```text
+Public Sources / Manual Import
+          ↓
+Normalize + Deduplicate
+          ↓
+Requirement Extraction
+          ↓
+Technical Match + Eligibility
+          ↓
+Human Review
+          ↓
+Factual CV Generation
+          ↓
+Approval
+          ↓
+Manual Application
+          ↓
+Tracking
+          ↓
+Conversion Analytics
+```
+
+---
+
+## 🌐 Discovery Layer
+
+The discovery system supports multiple public sources and keeps source failures isolated.
+
+### Sources
+
+- RemoteOK
+- Arbeitnow
+- Greenhouse
+- Lever
+- Ashby
+- Workable
+- SmartRecruiters
+- Recruitee
+- career pages exposing JSON-LD `JobPosting`
+
+### Discovery quality controls
+
+- configurable target roles,
+- configurable companies,
+- query filters,
+- freshness filters,
+- geography checks,
+- URL and fingerprint deduplication,
+- source latency and error metrics,
+- duplicate-rate tracking,
+- source-origin visibility.
+
+The dashboard preserves whether a job originally came from:
+
+- automatic discovery,
+- manual URL import,
+- pasted text,
+- manual form,
+- unknown legacy origin.
+
+---
+
+## 📄 Factual CV Architecture
+
+The private factual master CV is the system's source of truth.
+
+```text
+private/master_cv.yaml
+        ↓
+Verified facts
+        ↓
+Role-aware selection
+        ↓
+AdaptedCV
+        ↓
+Validation
+        ↓
+HTML Preview + PDF
+```
+
+Every generated bullet references one or more:
+
+```text
+source_fact_ids
+```
+
+Those IDs must resolve to factual entries in the master CV before rendering.
+
+This prevents the CV agent from introducing unsupported:
+
+- employers,
+- tools,
+- courses,
+- projects,
+- responsibilities,
+- achievements.
+
+The same validated model generates both HTML and PDF output.
+
+### CV output rules
+
+- ATS-friendly
+- selectable text
+- maximum **2 pages**
+- minimum **9.5 pt** body text
+- Windows-safe filenames
+- PDF validity checks before application workflows are enabled
+
+---
+
+## ✉️ Application & Gmail Draft Flow
+
+The application layer detects:
+
+```text
+LINK
+EMAIL
+LINK_EMAIL
+UNKNOWN
+```
+
+For email applications, the tool can prepare a Gmail draft only after explicit approval.
+
+```text
+GENERATED
+    ↓
+APPROVED
+    ↓
+GMAIL_DRAFT_CREATED
+```
+
+Real sending is intentionally disabled.
+
+Creating a Gmail draft **does not** mark the application as submitted.
+
+The integration uses Gmail OAuth with the `gmail.compose` scope and does not use passwords or SMTP.
+
+---
+
+## 📈 Application Tracking
+
+Job Hunter Agent keeps operational status and recruitment stage separate.
+
+Tracked stages can include:
+
+```text
+NOT_APPLIED
+APPLIED
+RECRUITER_CONTACT
+HR_INTERVIEW
+TECH_INTERVIEW
+ASSESSMENT
+FINAL_INTERVIEW
+OFFER
+HIRED
+REJECTED
+WITHDRAWN
+NO_RESPONSE
+```
+
+Every stage change is appended to history with:
+
+- timestamp,
+- optional note,
+- next-action date,
+- next-action note.
+
+Corrections create a new event rather than silently deleting history.
+
+This keeps the process auditable.
+
+---
+
+## 📊 Conversion Analytics
+
+The analytics layer measures the actual performance of the job search.
+
+### Metrics
+
+- response rate,
+- interview rate,
+- offer rate,
+- hire rate,
+- application funnel,
+- daily and weekly application volume,
+- performance by role family,
+- performance by source,
+- performance by channel,
+- performance by match-score bucket,
+- time to first response,
+- time from application to HR interview.
+
+Historical conversion is **descriptive only**.
+
+It does not automatically change technical scoring or reject future roles.
+
+---
+
+## 🖥️ Dashboard
 
 ### Job Hunt Dashboard
 
@@ -54,109 +325,13 @@ This project treats that workflow as a local data product. Python services handl
 
 ### Application Analytics
 
-The analytics view uses a temporary fictional SQLite dataset, clearly labeled in the screenshot; no demo records were inserted into the real database.
+The analytics screenshot uses a temporary fictional SQLite dataset.
 
 ![Application Analytics](docs/screenshots/tracking-analytics.png)
 
-## Technical Match vs Eligibility
+---
 
-Technical match and eligibility are deliberately separate dimensions.
-
-```text
-Technical match: 85%
-Eligibility:      REJECT
-Reason:           Advanced English required; candidate profile is intermediate.
-```
-
-The technical score can remain high because the candidate matches the role's tools and responsibilities. A hard eligibility rule still takes precedence over that score. Current hard-reject checks include:
-
-- unsupported seniority;
-- excessive required years of experience;
-- required English above the configured factual level;
-- explicit geography or location constraints.
-
-`APPLY`, `REVIEW`, and `REJECT` therefore describe the combined outcome, while the dashboard keeps the technical score visible and explains the primary eligibility reason.
-
-## Human-in-the-loop by design
-
-The system does **not**:
-
-- submit job applications automatically;
-- invent experience, employers, technologies, or achievements;
-- inflate or rewrite the candidate's English level;
-- mark a job as applied because a link was opened;
-- change application tracking stages without an explicit action;
-- send Gmail messages.
-
-The user explicitly reviews or approves:
-
-- the generated CV;
-- email content;
-- Gmail draft creation;
-- marking an application as submitted;
-- every recruitment-stage transition or correction.
-
-This boundary is a product requirement, not a missing automation feature.
-
-## Features
-
-### Discovery
-
-- RemoteOK and Arbeitnow public feeds.
-- Public ATS integrations: Greenhouse, Lever, Ashby, Workable, SmartRecruiters, and Recruitee.
-- Generic career pages exposing JSON-LD `JobPosting` data.
-- Configurable target roles, companies, queries, freshness, and geography checks.
-- URL/fingerprint deduplication and isolated source failures.
-- Source health, latency, relevance, duplicate, and error metrics.
-- Windows scheduler slots at 08:00 and 18:00 local time.
-- Clear origin visibility: automatic discovery, manual URL, pasted text, manual form, or unknown legacy origin.
-
-### Evaluation
-
-- Bilingual semantic matching and canonical requirement concepts.
-- Capability evidence derived from the factual master CV.
-- Independent technical score and eligibility evaluation.
-- Hard rejects for seniority, experience, English level, and explicit location constraints.
-- Explainable `APPLY`, `REVIEW`, and `REJECT` decisions with matched requirements and evidence.
-
-### CV Agent
-
-- A private factual master CV as the single source of truth.
-- Auditable `source_fact_ids` on generated bullets.
-- Role-aware selection and light semantic skill deduplication.
-- Windows-safe professional filenames: `<Candidate>_CV_<Role>_<Company>.pdf`.
-- ATS-friendly PDF with selectable text, a maximum of two pages, and a 9.5 pt minimum body size.
-- HTML preview/debug output generated from the same validated CV model.
-- PDF validity, page-count, and text checks before application workflows are enabled.
-
-### Applications
-
-- `LINK`, `EMAIL`, `LINK_EMAIL`, and `UNKNOWN` channel detection.
-- Recruiting-email and application-instruction extraction.
-- Explicit channel selection for mixed application paths.
-- Gmail OAuth Desktop flow using the `gmail.compose` scope.
-- Approval-gated lifecycle: `GENERATED -> APPROVED -> GMAIL_DRAFT_CREATED`.
-- Real Gmail sending is intentionally disabled.
-
-### Tracking
-
-- Separate operational status and recruitment-stage models.
-- Stages from `NOT_APPLIED` through recruiter contact, interviews, assessment, offer, hire, rejection, withdrawal, or no response.
-- Append-only stage history with timestamps and optional notes.
-- Next-action date and note.
-- Manual correction through a new history event rather than silent deletion.
-- Timeline view and no-response/follow-up indicators.
-
-### Analytics
-
-- Response, interview, offer, and hire rates.
-- Application funnel from submission through hire.
-- Daily and weekly application metrics.
-- Performance by role family, source, channel, and match-score bucket.
-- Time to first response and time from application to HR interview.
-- Descriptive analytics only: historical conversion never changes scoring or rejects a role.
-
-## Architecture
+## 🏗️ Architecture
 
 ```mermaid
 flowchart LR
@@ -174,64 +349,91 @@ flowchart LR
     D --> E --> F --> G --> H --> I
 ```
 
-The application is local-first:
+### Local-first design
 
-- SQLite stores jobs, discovery runs, import history, email state, tracking history, and analytics inputs.
-- `config/profile.yaml` and `private/master_cv.yaml` are local runtime files ignored by Git.
-- Gmail client secrets and OAuth tokens remain under `private/`.
-- Generated CVs remain under ignored `outputs/` directories.
-- The public repository contains example configuration, application code, and fictional test fixtures—not private runtime data.
+- SQLite stores operational state.
+- `config/profile.yaml` remains local.
+- `private/master_cv.yaml` remains local.
+- Gmail credentials and OAuth tokens remain under `private/`.
+- generated CVs remain under ignored `outputs/`.
+- public repository content uses example configuration and fictional fixtures.
 
-## Factual CV architecture
+---
 
-`private/master_cv.yaml` is the private factual source of truth. It is created locally from the public example and is never committed.
+## 🔐 Privacy & Security
 
-Every selected bullet:
+Private runtime data is deliberately excluded from the public repository.
 
-1. references one or more `source_fact_ids`;
-2. must resolve to facts in the loaded master CV;
-3. passes a validator before rendering;
-4. cannot introduce an unsupported employer, technology, course, project, or claim.
+- local SQLite databases are ignored,
+- `private/` is ignored,
+- generated CV outputs are ignored,
+- Gmail passwords are never requested or stored,
+- OAuth credentials stay local,
+- discovery uses public APIs and public career endpoints,
+- authenticated-page scraping is not used,
+- CAPTCHA or anti-bot controls are not bypassed,
+- LinkedIn login is not bypassed.
 
-The same validated `AdaptedCV` drives the HTML preview and PDF renderer. This makes factual provenance a structural constraint rather than a prompt convention.
+This project is built around public-source discovery and local personal data.
 
-## Workflow
+---
+
+## 🛠️ Tech Stack
+
+<p>
+  <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white">
+  <img src="https://img.shields.io/badge/Streamlit-App-FF4B4B?logo=streamlit&logoColor=white">
+  <img src="https://img.shields.io/badge/SQLite-Storage-003B57?logo=sqlite&logoColor=white">
+  <img src="https://img.shields.io/badge/Gmail-OAuth-EA4335?logo=gmail&logoColor=white">
+  <img src="https://img.shields.io/badge/PDF-ATS--friendly-B30B00?logo=adobeacrobatreader&logoColor=white">
+  <img src="https://img.shields.io/badge/Windows-Task_Scheduler-0078D6?logo=windows&logoColor=white">
+</p>
+
+**Methods:** Data Product Design · Automation · Requirement Matching · Eligibility Rules · Human-in-the-Loop · Workflow Tracking · Funnel Analytics
+
+---
+
+## 🧪 Engineering Quality
+
+- **330+ tests passing locally**
+- unit tests
+- integration tests
+- migration tests
+- UI regression tests
+- isolated source failures
+- immutable stage history
+- factual provenance validation
+- PDF validity checks
+- guarded scheduler execution
+- explicit application-state transitions
+
+No public CI or coverage percentage is claimed because the repository currently has no published CI workflow or coverage report.
+
+---
+
+## 📂 Project Structure
 
 ```text
-Discover or import
-    -> Normalize and deduplicate
-    -> Evaluate technical match and eligibility
-    -> Human review
-    -> Generate and validate CV
-    -> Approve application material
-    -> Apply manually
-    -> Track stages and next actions
-    -> Analyze conversion
+app/                    Streamlit dashboard and approval UI
+config/                 Public examples and factual-data templates
+scripts/                Windows scheduler installation and guarded runners
+src/job_hunter/         Discovery, scoring, CV, Gmail, tracking and analytics
+tests/                  Fictional tests and regression coverage
+data/                   Public sample input; runtime databases ignored
+docs/screenshots/       Public-safe screenshots
 ```
 
-An `APPLY` decision is a recommendation to review and prepare an application. It never means auto-submit.
+---
 
-### Discovery origin visibility
-
-The dashboard distinguishes jobs initially created by:
-
-- automatic discovery;
-- manual public-URL import;
-- pasted-text import;
-- manual form;
-- unknown legacy origin.
-
-If discovery later finds a manually imported job, deduplication preserves the original job ID and initial manual origin while recording enough source metadata to recognize the later automatic encounter. Scheduler quality can therefore be evaluated without mixing in manual research.
-
-## Quick Start
+## ▶️ Run Locally
 
 ### Requirements
 
 - Python 3.11+
 - Windows PowerShell for the commands below
-- SQLite, included with Python
+- SQLite included with Python
 
-### Install and run
+### Install
 
 ```powershell
 git clone https://github.com/GabArg/job-hunter-agent.git
@@ -239,13 +441,15 @@ cd job-hunter-agent
 
 python -m venv .venv
 .venv\Scripts\Activate.ps1
+
 python -m pip install -e ".[dev]"
 
 Copy-Item config/profile.example.yaml config/profile.yaml
+
 streamlit run app/streamlit_app.py
 ```
 
-For local CV generation, create a private working copy of the factual example and replace only its fictional/example content with reviewed facts:
+Create a local factual CV:
 
 ```powershell
 New-Item -ItemType Directory -Force private
@@ -254,28 +458,32 @@ Copy-Item config/master_cv.example.yaml private/master_cv.yaml
 
 Never commit the private copy.
 
-### Useful commands
+---
+
+## 🧭 Useful Commands
 
 ```powershell
-# Run public-source discovery
+# Discovery
 python -m job_hunter.cli discover --query "Data Analyst" --limit 10
 python -m job_hunter.cli discover --source remoteok --query "Business Analyst" --limit 5
 
-# Generate a validated HTML + PDF CV for a stored job
+# CV generation
 python -m job_hunter.cli generate-cv 123 --master-cv private/master_cv.yaml
 
-# Inspect or update local application tracking
+# Tracking
 job-hunter tracking-summary
 job-hunter set-stage 123 HR_INTERVIEW --note "Fictional local note"
 job-hunter application-history 123
 
-# Run the test suite
+# Tests
 pytest
 ```
 
-## Scheduler
+---
 
-The default local schedule uses two Windows Task Scheduler slots:
+## ⏰ Scheduler
+
+The default Windows scheduler uses two local slots:
 
 ```text
 08:00
@@ -288,83 +496,62 @@ Install them explicitly:
 powershell -ExecutionPolicy Bypass -File scripts/install_windows_tasks.ps1
 ```
 
-The installer creates `JobHunter-Morning` and `JobHunter-Evening` with local time, `StartWhenAvailable`, and a single-instance policy. The runner resolves the repository root, activates `.venv` when present, uses a discovery lock, and writes ignored logs under `logs/discovery/`.
+The installer creates:
 
-Run the same guarded workflow manually with:
+```text
+JobHunter-Morning
+JobHunter-Evening
+```
+
+The runner uses:
+
+- repository-root resolution,
+- `.venv` activation,
+- discovery locking,
+- single-instance execution,
+- ignored local logs.
+
+Run the guarded workflow manually with:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/run_discovery.ps1 -Slot manual
 ```
 
-Task installation is never triggered by the application or tests.
+Task installation is never triggered automatically by the application or tests.
 
-## Gmail drafts
+---
 
-The Gmail integration requests only the official `https://www.googleapis.com/auth/gmail.compose` scope. It can create an explicitly approved draft with the validated PDF attached:
+## ⚠️ Current Limitations
 
-```text
-GENERATED -> APPROVED -> GMAIL_DRAFT_CREATED
-```
+- Not a hosted SaaS product.
+- No automatic application submission.
+- Gmail sending is disabled.
+- Match quality depends on extracted requirements and factual profile configuration.
+- Some career pages may change their public structure.
+- Analytics become more useful as more real tracking history accumulates.
+- No public CI or published coverage report is currently claimed.
 
-Real Gmail sending is intentionally disabled. The application does not use passwords or SMTP.
+---
 
-Local OAuth files belong only in:
+## 🚀 Potential Next Steps
 
-```text
-private/gmail/client_secret.json
-private/gmail/token.json
-```
+- Measure weekday discovery precision and source health.
+- Tune source queries using observed false positives and duplicates.
+- Improve conversion analytics with more tracking history.
+- Add optional local notifications for next actions.
+- Improve role-family and source performance analysis.
+- Explore an explicitly reviewed feedback loop for ranking improvements.
+- Add public CI when the workflow is stable.
 
-Connect explicitly from `System / Runs` or with:
+Automatic application submission remains intentionally out of scope.
 
-```powershell
-python -m job_hunter.cli gmail-connect
-python -m job_hunter.cli gmail-status
-```
+---
 
-Creating a draft does not mark a job as applied.
+## 👤 Author
 
-## Privacy & Security
+**Guido Arturo Broccoli**
 
-- `data/jobs.db` and other local SQLite files are ignored.
-- `private/` is ignored, including profile data, factual CV data, Gmail credentials, and OAuth tokens.
-- `outputs/` is ignored, including generated CVs.
-- The application never requests or stores a Gmail password.
-- Discovery uses public APIs, public ATS endpoints, and public structured career pages.
-- It does not bypass LinkedIn login, scrape authenticated pages, solve CAPTCHAs, evade rate limits, or circumvent anti-bot controls.
-- Notes and tracking data remain local; users should not store secrets in notes.
+[LinkedIn](https://www.linkedin.com/in/guido-a-broccoli) ·
+[GitHub](https://github.com/GabArg) ·
+[Repository](https://github.com/GabArg/job-hunter-agent)
 
-## Project Structure
-
-```text
-app/                    Streamlit dashboard and human approval UI
-config/                 Public example profiles and factual-data templates
-scripts/                Windows scheduler installation and guarded runners
-src/job_hunter/         Domain logic, ingestion, scoring, CV, Gmail, tracking, and analytics
-tests/                  Fictional unit, integration, migration, and UI regression tests
-data/                   Public sample input; runtime SQLite files are ignored
-docs/screenshots/       Checklist and future public-safe screenshots
-```
-
-## Current Status
-
-- Local-first, production-like personal tool; not a hosted SaaS product.
-- Active multi-source discovery and Windows scheduler support.
-- Manual URL, pasted-text, and form imports.
-- Requirement-aware scoring and hard eligibility checks.
-- Validated ATS-friendly PDF generation.
-- Approval-gated Gmail draft creation; sending disabled.
-- Manual application tracking and conversion analytics.
-- More than 330 tests passing locally.
-
-No CI status or coverage percentage is claimed because the repository currently has no public CI workflow or published coverage report.
-
-## Roadmap
-
-- Observe weekday discovery precision and source health with real local runs.
-- Tune discovery queries and target registries using measured false positives and duplicates.
-- Improve conversion views as more tracking history becomes available.
-- Add optional local notifications for next actions and stale applications.
-- Explore a future, explicitly reviewed feedback loop without automatic rejection or auto-apply.
-
-Automatic application submission is intentionally not on the roadmap.
