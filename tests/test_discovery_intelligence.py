@@ -96,6 +96,18 @@ def test_target_health_after_three_failures():
     target.register_result(None); assert target.health == TargetHealth.HEALTHY
 
 
+def test_persisted_source_health_marks_repeated_empty_as_stale(tmp_path):
+    database = JobDatabase(tmp_path / "health.db")
+    values = dict(run_id=None, source="empty", target="empty", sector="Other", fetched=0,
+                  relevant_by_title=0, relevant_after_description=0, pre_score_rejected=0,
+                  scored=0, apply_count=0, review_count=0, reject_count=0, duplicates=0,
+                  error=None, latency_ms=1, fresh_count=0, quality_score=0)
+    database.record_source_metric(**values)
+    assert database.source_intelligence()[0]["health"] == "EMPTY"
+    database.record_source_metric(**values); database.record_source_metric(**values)
+    assert database.source_intelligence()[0]["health"] == "STALE"
+
+
 def test_priority_freshness_under_72_hours():
     now = datetime(2026, 8, 29, tzinfo=timezone.utc)
     assert is_priority_fresh((now - timedelta(hours=71)).isoformat(), 3, now)

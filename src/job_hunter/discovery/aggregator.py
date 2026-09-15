@@ -35,6 +35,16 @@ class SourceStats:
     review_count: int = 0
     reject_count: int = 0
     fresh_count: int = 0
+    fresh: int = 0
+    geo_eligible: int = 0
+    role_relevant: int = 0
+    deduped: int = 0
+    new_jobs: int = 0
+    updated_jobs: int = 0
+    filter_reasons: dict[str, int] = field(default_factory=lambda: {
+        "stale": 0, "geo_incompatible": 0, "role_irrelevant": 0,
+        "duplicate": 0, "parse_error": 0, "source_error": 0,
+    })
 
     @property
     def found(self) -> int: return self.fetched
@@ -83,26 +93,38 @@ class DiscoveryAggregator:
             stat.sector = getattr(source, "sector", "Other")
             started = perf_counter()
             try:
-                source_jobs: list[RawJob] = []
+                batches: list[list[RawJob]] = []
                 for query in query_list:
-                    remaining = None if limit is None else max(0, limit - len(source_jobs))
-                    if remaining == 0:
-                        break
-                    source_jobs.extend(source.discover(query, location, remaining))
+                    batches.append(source.discover(query, location, limit))
+                source_jobs = _round_robin_unique(batches, limit)
                 stat.fetched = len(source_jobs)
                 for raw in source_jobs:
+                    if not raw.title.strip() or not raw.url.strip():
+                        stat.filter_reasons["parse_error"] += 1
+                        stat.rejected_pre_score += 1
+                        continue
+                    if not is_fresh(raw.published_at, max_age_days):
+                        stat.filter_reasons["stale"] += 1
+                        stat.rejected_pre_score += 1
+                        continue
+                    stat.fresh += 1
+                    geography_ok, _ = geography_compatible(raw, preferred_locations or [])
+                    if not geography_ok:
+                        stat.filter_reasons["geo_incompatible"] += 1
+                        stat.rejected_pre_score += 1
+                        continue
+                    stat.geo_eligible += 1
                     if not title_matches(raw.title, query_list, raw.description):
+                        stat.filter_reasons["role_irrelevant"] += 1
                         stat.rejected_pre_score += 1
                         continue
                     stat.relevant_by_title += 1
                     if not description_relevant(raw.title, raw.description):
+                        stat.filter_reasons["role_irrelevant"] += 1
                         stat.rejected_pre_score += 1
                         continue
                     stat.relevant_after_description += 1
-                    geography_ok, _ = geography_compatible(raw, preferred_locations or [])
-                    if not geography_ok or not is_fresh(raw.published_at, max_age_days):
-                        stat.rejected_pre_score += 1
-                        continue
+                    stat.role_relevant += 1
                     job = raw_to_job(raw)
                     configured_sector = getattr(source, "sector", "Other")
                     if configured_sector and configured_sector != "Other":
@@ -114,19 +136,41 @@ class DiscoveryAggregator:
                     fingerprint = job_fingerprint(job)
                     if (url_key and url_key in seen_urls) or fingerprint in seen_fingerprints:
                         stat.duplicates += 1
+                        stat.filter_reasons["duplicate"] += 1
                         continue
                     if url_key:
                         seen_urls.add(url_key)
                     seen_fingerprints.add(fingerprint)
                     result.jobs.append(job)
+                    stat.deduped += 1
                     stat.scored += 1
                     stat.fresh_count += int(job.priority_fresh)
             except Exception as exc:  # A failed source must not stop discovery.
                 logger.warning("Discovery source %s failed: %s", source.name, exc)
                 stat.error = f"{type(exc).__name__}: {exc}"
+                stat.filter_reasons["source_error"] += 1
             finally:
                 stat.latency_ms = round((perf_counter() - started) * 1000)
         return result
+
+
+def _round_robin_unique(batches: list[list[RawJob]], limit: int | None) -> list[RawJob]:
+    """Avoid early-query starvation while counting each source posting once."""
+    result: list[RawJob] = []
+    seen: set[str] = set()
+    width = max((len(batch) for batch in batches), default=0)
+    for index in range(width):
+        for batch in batches:
+            if index >= len(batch):
+                continue
+            raw = batch[index]
+            key = canonical_url(raw.url) or f"{raw.source}:{raw.external_id}"
+            if key in seen:
+                continue
+            seen.add(key); result.append(raw)
+            if limit is not None and len(result) >= limit:
+                return result
+    return result
 
 
 def raw_to_job(raw: RawJob) -> Job:

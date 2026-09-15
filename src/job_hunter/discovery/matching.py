@@ -18,7 +18,7 @@ INCOMPATIBLE_REGIONS = (
 ARGENTINA_LOCATIONS = (
     "argentina", "buenos aires", "caba", "amba", "provincia de buenos aires",
     "remote argentina", "remote latam", "latin america", "latam", "south america",
-    "remote anywhere in latam",
+    "remote anywhere in latam", "remote americas", "americas", "worldwide", "anywhere",
 )
 
 
@@ -48,8 +48,10 @@ def geography_compatible(raw: RawJob, preferred_locations: list[str]) -> tuple[b
         if argentina_explicit:
             return True, None
         if "remote" in evidence:
-            return False, "Remote sin confirmación de disponibilidad para Argentina/LATAM"
-        return False, "Ubicación fuera del foco Argentina/LATAM"
+            return True, "Geografía remota no confirmada para Argentina/LATAM"
+        if normalized(raw.location):
+            return False, "Ubicación explícita fuera del foco Argentina/LATAM"
+        return True, "Geografía desconocida o no confirmada"
     if preferences and not any(value in evidence for value in preferences):
         return False, "Ubicación no preferida"
     return True, None

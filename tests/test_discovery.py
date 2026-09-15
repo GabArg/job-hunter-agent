@@ -29,7 +29,7 @@ def raw(
         description="<p>Excel, SQL y pricing. Inglés intermedio. 1 año de experiencia.</p>",
         source=source,
         url=url,
-        published_at="2026-08-29",
+        published_at=datetime.now(timezone.utc).date().isoformat(),
     )
 
 
@@ -186,6 +186,30 @@ def test_freshness_filter():
     assert is_fresh(None, 14, now)
     recent_milliseconds = int((now - timedelta(days=2)).timestamp() * 1000)
     assert is_fresh(str(recent_milliseconds), 14, now)
+
+
+def test_unknown_geo_is_reviewable_but_explicit_restrictions_are_filtered():
+    unknown = raw(title="Data Analyst"); unknown.location = ""; unknown.work_mode = "remote"
+    assert geography_compatible(unknown, ["Argentina"])[0]
+    incompatible = raw(title="Data Analyst"); incompatible.location = "Remote"
+    incompatible.description = "Applicants must be US only"
+    assert not geography_compatible(incompatible, ["Argentina"])[0]
+
+
+def test_remote_americas_and_worldwide_are_compatible():
+    for location in ("Remote Americas", "Americas", "Worldwide"):
+        job = raw(title="Data Analyst"); job.location = location; job.work_mode = "remote"
+        assert geography_compatible(job, ["Argentina"])[0]
+
+
+def test_funnel_uses_one_consistent_filter_reason():
+    stale = raw("https://example.com/stale", title="Data Analyst"); stale.published_at = "2020-01-01"
+    irrelevant = raw("https://example.com/engineer", title="Lead ML Engineer")
+    result = DiscoveryAggregator([FakeSource("funnel", [stale, irrelevant])]).discover(
+        ["Data Analyst"], preferred_locations=["Argentina"], max_age_days=14)
+    stat = result.stats["funnel"]
+    assert (stat.fetched, stat.fresh, stat.geo_eligible, stat.role_relevant) == (2, 1, 1, 0)
+    assert stat.filter_reasons["stale"] == stat.filter_reasons["role_irrelevant"] == 1
 
 
 def test_ranking_apply_before_review_before_reject():

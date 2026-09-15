@@ -737,6 +737,25 @@ with system_tab:
     st.caption(f"Fuentes: {', '.join(source_names) or 'Ninguna'} · Horarios: {', '.join(schedule.get('times', [])) if schedule.get('enabled', True) else 'Desactivados'}")
     st.caption("Scheduler de Windows: scripts preparados; estado no consultado para evitar requerir privilegios.")
     if runs:
+        latest = runs[0]
+        st.subheader("Funnel del último run")
+        funnel_columns = st.columns(9)
+        for column, (label, key) in zip(funnel_columns, (
+            ("Fetched", "fetched"), ("Fresh", "fresh"), ("Geo eligible", "geo_eligible"),
+            ("Role relevant", "role_relevant"), ("Deduplicated", "deduped"),
+            ("New", "new_jobs"), ("Scored", "scored"), ("Apply", "apply_count"),
+            ("Review / Reject", None),
+        )):
+            value = f'{latest["review_count"]} / {latest["reject_count"]}' if key is None else latest.get(key, 0)
+            column.metric(label, value)
+        latest_sources = database.source_metrics_for_run(latest["id"])
+        if latest_sources:
+            st.dataframe([{"Source": row["source"], "Fetched": row["fetched"], "Fresh": row["fresh"],
+                           "Geo eligible": row["geo_eligible"], "Role relevant": row["role_relevant"],
+                           "Deduplicated": row["deduped"], "New": row["new_jobs"], "Scored": row["scored"],
+                           "APPLY": row["apply_count"], "REVIEW": row["review_count"], "REJECT": row["reject_count"],
+                           "Filters": row["filter_reasons"], "Health": row["health"]} for row in latest_sources],
+                         hide_index=True, width="stretch")
         st.dataframe([{"Run": run["id"], "Inicio": _display_time(run["started_at"]), "Fin": _display_time(run["finished_at"]),
                        "Estado": run["status"], "Fuentes": run["sources"], "Preliminares": run["preliminary"],
                        "Nuevas automáticas": run["new_jobs"], "Actualizadas": run["updated_jobs"], "Duplicadas": run["duplicates"],
@@ -771,6 +790,7 @@ with system_tab:
                        "REVIEW": row["review_count"], "REJECT": row["reject_count"],
                        "Duplicates": row["duplicates"], "Errors": row["errors"],
                        "Quality Score": row["quality_score"], "Health": row["health"],
+                       "Last success": _display_time(row["last_success_at"]), "Last jobs": row["last_jobs_count"],
                        "Última ejecución": _display_time(row["last_run"])} for row in intelligence],
                      hide_index=True, width="stretch")
     else:

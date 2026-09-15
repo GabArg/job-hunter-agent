@@ -99,6 +99,16 @@ def test_discovery_expands_target_roles_bilingually():
     assert {"analista de datos", "analista funcional", "analista de precios", "analista de operaciones"} <= set(expanded)
 
 
+def test_new_discovery_aliases_do_not_admit_unrelated_data_leads():
+    aliases = expand_target_roles(["Data Analyst", "BI Analyst"])
+    for title in ("Junior Data Analyst", "Jr Data Analyst", "Analytics Analyst",
+                  "Data & Reporting Analyst", "Insights Analyst", "Analista de Reporting",
+                  "Analista de Inteligencia de Negocio"):
+        assert title_matches(title, aliases)
+    for title in ("Senior Data Scientist", "Principal Data Engineer", "Lead ML Engineer"):
+        assert not title_matches(title, aliases)
+
+
 def test_commercial_analyst_needs_pricing_signals_for_pricing_role():
     assert "pricing-analyst" not in detect_roles("Analista Comercial", "Gestión general de clientes")
     assert "pricing-analyst" in detect_roles("Analista Comercial", "Análisis de precios, márgenes y rentabilidad")

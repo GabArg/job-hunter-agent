@@ -25,9 +25,9 @@ class RemoteOKSource(JobSource):
         for item in payload:
             if not isinstance(item, dict) or not item.get("position") or not item.get("url"):
                 continue  # The first feed item is normally a legal notice.
-            searchable = " ".join(
-                [str(item.get("position", "")), str(item.get("description", "")), " ".join(item.get("tags") or [])]
-            ).lower()
+            # Discovery is role-led: description/tag matches such as "data" in
+            # an engineering job must not consume the per-source coverage cap.
+            searchable = str(item.get("position", "")).lower()
             if query and not _query_matches(query, searchable):
                 continue
             item_location = str(item.get("location") or "Remote")

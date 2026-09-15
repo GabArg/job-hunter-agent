@@ -59,14 +59,26 @@ def run_discovery_pipeline(
             max_age_days=max_age_days,
             priority_fresh_days=profile.priority_fresh_days,
         )
+        existing_urls = {job.url for job in discovery.jobs if database.get_job(url=job.url) is not None}
         processed = process_jobs(discovery.jobs, profile_path, database_path)
+        for source_name, stat in discovery.stats.items():
+            source_urls = [job.url for job in discovery.jobs if job.source.casefold() == source_name.casefold()]
+            stat.updated_jobs = sum(url in existing_urls for url in source_urls)
+            stat.new_jobs = len(source_urls) - stat.updated_jobs
         counts = {decision: sum(job.decision == decision for job in processed.jobs) for decision in ("APPLY", "REVIEW", "REJECT")}
+        funnel = {name: sum(getattr(stat, name) for stat in discovery.stats.values())
+                  for name in ("fetched", "fresh", "geo_eligible", "role_relevant", "deduped", "scored")}
+        filter_reasons = {reason: sum(stat.filter_reasons[reason] for stat in discovery.stats.values())
+                          for reason in next(iter(discovery.stats.values())).filter_reasons} if discovery.stats else {}
         database.finish_discovery_run(
             run_id, status="COMPLETED_WITH_ERRORS" if discovery.errors else "COMPLETED",
             preliminary=sum(stat.fetched for stat in discovery.stats.values()), new_jobs=processed.inserted,
             updated_jobs=processed.updated, duplicates=discovery.duplicates,
             apply_count=counts["APPLY"], review_count=counts["REVIEW"], reject_count=counts["REJECT"],
             errors=discovery.errors,
+            fetched=funnel["fetched"], fresh=funnel["fresh"], geo_eligible=funnel["geo_eligible"],
+            role_relevant=funnel["role_relevant"], deduped=funnel["deduped"], scored=funnel["scored"],
+            filter_reasons=filter_reasons,
         )
         for source_name, stat in discovery.stats.items():
             source_jobs = [job for job in processed.jobs if job.source.casefold() == source_name.casefold()]
@@ -87,7 +99,9 @@ def run_discovery_pipeline(
                 fresh_count=stat.fresh_count,
                 quality_score=quality_score(stat.fetched, stat.relevant_after_description,
                                             stat.apply_count, stat.review_count, stat.duplicates,
-                                            int(bool(stat.error)), stat.fresh_count),
+                                            int(bool(stat.error)), stat.fresh_count), fresh=stat.fresh,
+                geo_eligible=stat.geo_eligible, role_relevant=stat.role_relevant, deduped=stat.deduped,
+                new_jobs=stat.new_jobs, updated_jobs=stat.updated_jobs, filter_reasons=stat.filter_reasons,
             )
     except Exception as exc:
         database.finish_discovery_run(run_id, status="FAILED", errors={"pipeline": f"{type(exc).__name__}: {exc}"})

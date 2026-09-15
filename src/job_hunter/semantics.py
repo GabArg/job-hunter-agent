@@ -44,14 +44,14 @@ CONCEPT_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 ROLE_ALIASES: dict[str, tuple[str, ...]] = {
-    "data-analyst": ("data analyst", "analista de datos", "analista de información", "analista de informacion", "reporting analyst", "analista de reporting"),
+    "data-analyst": ("data analyst", "junior data analyst", "jr data analyst", "analytics analyst", "data & reporting analyst", "insights analyst", "analista de datos", "analista de información", "analista de informacion", "reporting analyst", "analista de reporting"),
     "business-analyst": ("business analyst", "analista de negocios"),
     "business-analyst-functional": ("analista funcional", "functional analyst"),
     "business-analyst-operations": ("analista de procesos", "business process analyst"),
     "pricing-analyst": ("pricing analyst", "analista de pricing", "analista de precios"),
     "commercial-analyst": ("analista comercial", "commercial analyst"),
     "operations-analyst": ("operations analyst", "analista de operaciones", "analista de procesos"),
-    "bi-analyst": ("bi analyst", "business intelligence analyst", "analista bi", "analista de business intelligence"),
+    "bi-analyst": ("bi analyst", "business intelligence analyst", "analista bi", "analista de business intelligence", "analista de inteligencia de negocio"),
 }
 
 DISPLAY_NAMES = {concept: concept.replace("-", " ").title() for concept in CONCEPT_ALIASES}

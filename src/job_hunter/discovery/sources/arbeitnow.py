@@ -26,9 +26,7 @@ class ArbeitnowSource(JobSource):
             raise ValueError("Arbeitnow returned an unexpected response")
         jobs: list[RawJob] = []
         for item in payload["data"]:
-            searchable = " ".join(
-                [str(item.get("title", "")), str(item.get("description", "")), " ".join(item.get("tags") or [])]
-            ).lower()
+            searchable = str(item.get("title", "")).lower()
             if query and not _query_matches(query, searchable):
                 continue
             item_location = str(item.get("location") or ("Remote" if item.get("remote") else ""))

@@ -143,9 +143,11 @@ def main() -> None:
             status = f"ERROR {stat.error}" if stat.error else "OK"
             print(
                 f"{name}: fetched={stat.fetched} title_relevant={stat.relevant_by_title} "
+                f"fresh={stat.fresh} geo_eligible={stat.geo_eligible} role_relevant={stat.role_relevant} "
+                f"deduped={stat.deduped} new={stat.new_jobs} updated={stat.updated_jobs} "
                 f"description_relevant={stat.relevant_after_description} pre_score_rejected={stat.rejected_pre_score} "
                 f"scored={stat.scored} APPLY={stat.apply_count} REVIEW={stat.review_count} REJECT={stat.reject_count} "
-                f"duplicates={stat.duplicates} latency_ms={stat.latency_ms} status={status}"
+                f"duplicates={stat.duplicates} filters={stat.filter_reasons} latency_ms={stat.latency_ms} status={status}"
             )
     elif args.command == "tracking-summary":
         from .tracking import analytics_snapshot
