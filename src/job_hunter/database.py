@@ -61,7 +61,9 @@ CREATE TABLE IF NOT EXISTS discovery_runs (
     deduped INTEGER NOT NULL DEFAULT 0, scored INTEGER NOT NULL DEFAULT 0,
     filter_reasons TEXT NOT NULL DEFAULT '{}', total_elapsed_ms INTEGER NOT NULL DEFAULT 0,
     sources_started INTEGER NOT NULL DEFAULT 0, sources_completed INTEGER NOT NULL DEFAULT 0,
-    sources_failed INTEGER NOT NULL DEFAULT 0, sources_timed_out INTEGER NOT NULL DEFAULT 0
+    sources_failed INTEGER NOT NULL DEFAULT 0, sources_timed_out INTEGER NOT NULL DEFAULT 0,
+    sources_skipped_budget INTEGER NOT NULL DEFAULT 0, sources_cooldown INTEGER NOT NULL DEFAULT 0,
+    sources_exploration_skipped INTEGER NOT NULL DEFAULT 0, quality_guard TEXT DEFAULT 'NOT_EVALUATED'
 )
 """
 SOURCE_METRICS_SCHEMA = """
@@ -76,6 +78,8 @@ CREATE TABLE IF NOT EXISTS source_metrics (
  ,fresh INTEGER DEFAULT 0, geo_eligible INTEGER DEFAULT 0, role_relevant INTEGER DEFAULT 0,
  deduped INTEGER DEFAULT 0, new_jobs INTEGER DEFAULT 0, updated_jobs INTEGER DEFAULT 0,
  filter_reasons TEXT NOT NULL DEFAULT '{}', last_success_at TEXT, last_jobs_count INTEGER DEFAULT 0
+ ,priority_tier TEXT DEFAULT 'TIER_2', value_score REAL DEFAULT 30,
+ cooldown_until TEXT, skipped_reason TEXT, relevant_per_second REAL DEFAULT 0
 )
 """
 GMAIL_AUDIT_SCHEMA = """
@@ -153,6 +157,9 @@ class JobDatabase:
                 "total_elapsed_ms": "INTEGER NOT NULL DEFAULT 0", "sources_started": "INTEGER NOT NULL DEFAULT 0",
                 "sources_completed": "INTEGER NOT NULL DEFAULT 0", "sources_failed": "INTEGER NOT NULL DEFAULT 0",
                 "sources_timed_out": "INTEGER NOT NULL DEFAULT 0",
+                "sources_skipped_budget": "INTEGER NOT NULL DEFAULT 0", "sources_cooldown": "INTEGER NOT NULL DEFAULT 0",
+                "sources_exploration_skipped": "INTEGER NOT NULL DEFAULT 0",
+                "quality_guard": "TEXT DEFAULT 'NOT_EVALUATED'",
             }.items():
                 if name not in run_columns: connection.execute(f"ALTER TABLE discovery_runs ADD COLUMN {name} {definition}")
             metric_columns = {row[1] for row in connection.execute("PRAGMA table_info(source_metrics)")}
@@ -162,6 +169,8 @@ class JobDatabase:
                 "new_jobs": "INTEGER DEFAULT 0", "updated_jobs": "INTEGER DEFAULT 0",
                 "filter_reasons": "TEXT NOT NULL DEFAULT '{}'", "last_success_at": "TEXT",
                 "last_jobs_count": "INTEGER DEFAULT 0",
+                "priority_tier": "TEXT DEFAULT 'TIER_2'", "value_score": "REAL DEFAULT 30",
+                "cooldown_until": "TEXT", "skipped_reason": "TEXT", "relevant_per_second": "REAL DEFAULT 0",
             }.items():
                 if name not in metric_columns: connection.execute(f"ALTER TABLE source_metrics ADD COLUMN {name} {definition}")
             connection.execute("UPDATE jobs SET discovered_at = COALESCE(discovered_at, created_at)")
@@ -488,17 +497,22 @@ class JobDatabase:
                              role_relevant: int = 0, deduped: int = 0, scored: int = 0,
                              filter_reasons: dict | None = None, total_elapsed_ms: int = 0,
                              sources_started: int = 0, sources_completed: int = 0,
-                             sources_failed: int = 0, sources_timed_out: int = 0) -> None:
+                             sources_failed: int = 0, sources_timed_out: int = 0,
+                             sources_skipped_budget: int = 0, sources_cooldown: int = 0,
+                             sources_exploration_skipped: int = 0, quality_guard: str = "NOT_EVALUATED") -> None:
         with self._connect() as connection:
             connection.execute("""UPDATE discovery_runs SET finished_at=?,status=?,preliminary=?,new_jobs=?,updated_jobs=?,
                 duplicates=?,apply_count=?,review_count=?,reject_count=?,errors=?,fetched=?,fresh=?,
                 geo_eligible=?,role_relevant=?,deduped=?,scored=?,filter_reasons=?,total_elapsed_ms=?,
-                sources_started=?,sources_completed=?,sources_failed=?,sources_timed_out=? WHERE id=? AND status='RUNNING'""",
+                sources_started=?,sources_completed=?,sources_failed=?,sources_timed_out=?,
+                sources_skipped_budget=?,sources_cooldown=?,sources_exploration_skipped=?,quality_guard=?
+                WHERE id=? AND status='RUNNING'""",
                 (utc_now(), status, preliminary, new_jobs, updated_jobs, duplicates, apply_count,
                  review_count, reject_count, json.dumps(errors or {}, ensure_ascii=False), fetched, fresh,
                  geo_eligible, role_relevant, deduped, scored,
                  json.dumps(filter_reasons or {}, ensure_ascii=False), total_elapsed_ms, sources_started,
-                 sources_completed, sources_failed, sources_timed_out, run_id))
+                 sources_completed, sources_failed, sources_timed_out, sources_skipped_budget, sources_cooldown,
+                 sources_exploration_skipped, quality_guard, run_id))
 
     def list_discovery_runs(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._connect() as connection:
@@ -508,9 +522,20 @@ class JobDatabase:
     def latest_discovery_run(self) -> dict[str, Any] | None:
         rows = self.list_discovery_runs(1); return rows[0] if rows else None
 
+    def latest_completed_discovery_run(self) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM discovery_runs WHERE status LIKE 'COMPLETED%' ORDER BY id DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
+
     def source_metrics_for_run(self, run_id: int) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute("SELECT * FROM source_metrics WHERE run_id=? ORDER BY latency_ms DESC,source", (run_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def recent_source_metrics(self, source: str, limit: int = 10) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT * FROM source_metrics WHERE source=? AND skipped_reason IS NULL ORDER BY id DESC LIMIT ?",
+                                      (source, limit)).fetchall()
         return [dict(row) for row in rows]
 
     def latest_discovery_jobs(self) -> list[dict[str, Any]]:
@@ -527,27 +552,33 @@ class JobDatabase:
                              fresh_count: int, quality_score: float, fresh: int = 0,
                              geo_eligible: int = 0, role_relevant: int = 0, deduped: int = 0,
                              new_jobs: int = 0, updated_jobs: int = 0,
-                             filter_reasons: dict | None = None) -> None:
+                             filter_reasons: dict | None = None, priority_tier: str = "TIER_2",
+                             value_score: float = 30.0, cooldown_until: str | None = None,
+                             skipped_reason: str | None = None) -> None:
         with self._connect() as connection:
-            previous = connection.execute("SELECT consecutive_failures,last_success_at FROM source_metrics WHERE source=? ORDER BY id DESC LIMIT 1", (source,)).fetchone()
-            failures = (int(previous[0]) + 1 if previous else 1) if error else 0
+            previous = connection.execute("SELECT consecutive_failures,last_success_at,health FROM source_metrics WHERE source=? ORDER BY id DESC LIMIT 1", (source,)).fetchone()
+            failures = int(previous[0]) if skipped_reason and previous else ((int(previous[0]) + 1 if previous else 1) if error else 0)
             last_success = previous[1] if previous else None
-            if not error: last_success = utc_now()
+            if not error and not skipped_reason: last_success = utc_now()
             recent_counts = [int(row[0] or 0) for row in connection.execute(
                 "SELECT fetched FROM source_metrics WHERE source=? ORDER BY id DESC LIMIT 2", (source,)).fetchall()]
-            if error: health = "ERROR"
+            if skipped_reason: health = previous[2] if previous else "EMPTY"
+            elif error: health = "ERROR"
             elif fetched == 0: health = "STALE" if len(recent_counts) == 2 and not any(recent_counts) else "EMPTY"
             elif deduped == 0: health = "LOW_VOLUME"
             else: health = "HEALTHY"
             connection.execute("""INSERT INTO source_metrics (run_id,source,target,sector,recorded_at,fetched,
                 relevant_by_title,relevant_after_description,pre_score_rejected,scored,apply_count,review_count,
                 reject_count,duplicates,errors,error_message,latency_ms,fresh_count,quality_score,consecutive_failures,health,
-                fresh,geo_eligible,role_relevant,deduped,new_jobs,updated_jobs,filter_reasons,last_success_at,last_jobs_count)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                fresh,geo_eligible,role_relevant,deduped,new_jobs,updated_jobs,filter_reasons,last_success_at,last_jobs_count,
+                priority_tier,value_score,cooldown_until,skipped_reason,relevant_per_second)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (run_id,source,target,sector,utc_now(),fetched,relevant_by_title,relevant_after_description,
                  pre_score_rejected,scored,apply_count,review_count,reject_count,duplicates,int(bool(error)),error,
                  latency_ms,fresh_count,quality_score,failures,health,fresh,geo_eligible,role_relevant,deduped,
-                 new_jobs,updated_jobs,json.dumps(filter_reasons or {}, ensure_ascii=False),last_success,fetched))
+                 new_jobs,updated_jobs,json.dumps(filter_reasons or {}, ensure_ascii=False),last_success,fetched,
+                 priority_tier,value_score,cooldown_until,skipped_reason,
+                 round(role_relevant / max(.001, latency_ms / 1000), 3)))
 
     def source_intelligence(self, sector: str | None = None) -> list[dict[str, Any]]:
         condition, values = ("WHERE sector=?", [sector]) if sector and sector != "All" else ("", [])
@@ -555,6 +586,10 @@ class JobDatabase:
             SUM(apply_count) apply_count,SUM(review_count) review_count,SUM(reject_count) reject_count,
             SUM(duplicates) duplicates,SUM(errors) errors,ROUND(AVG(quality_score),2) quality_score,
             MAX(recorded_at) last_run, MAX(last_success_at) last_success_at, ROUND(AVG(latency_ms)) average_latency_ms,
+            (SELECT priority_tier FROM source_metrics recent WHERE recent.source=source_metrics.source ORDER BY id DESC LIMIT 1) priority_tier,
+            (SELECT value_score FROM source_metrics recent WHERE recent.source=source_metrics.source ORDER BY id DESC LIMIT 1) value_score,
+            (SELECT cooldown_until FROM source_metrics recent WHERE recent.source=source_metrics.source ORDER BY id DESC LIMIT 1) cooldown_until,
+            ROUND(AVG(relevant_per_second),3) relevant_per_second,
             (SELECT last_jobs_count FROM source_metrics recent WHERE recent.source=source_metrics.source ORDER BY id DESC LIMIT 1) last_jobs_count,
             (SELECT latency_ms FROM source_metrics recent WHERE recent.source=source_metrics.source ORDER BY id DESC LIMIT 1) last_latency_ms,
             (SELECT consecutive_failures FROM source_metrics recent WHERE recent.source=source_metrics.source ORDER BY id DESC LIMIT 1) consecutive_failures,

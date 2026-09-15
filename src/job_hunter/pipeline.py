@@ -12,6 +12,7 @@ from .models import Job
 from .normalizer import normalize_job
 from .scorer import score_job
 from .discovery.target_registry import quality_score
+from .discovery.prioritization import build_source_plan
 
 REQUIRED_COLUMNS = {"title", "company", "location", "work_mode", "description", "source", "url"}
 
@@ -50,10 +51,20 @@ def run_discovery_pipeline(
     max_age_days: int | None = 14,
     max_workers: int = 6,
     target_timeout_seconds: float = 45.0,
+    run_budget_seconds: float | None = 120.0,
+    cooldown_hours: float = 12.0,
+    exploration_hours: float = 12.0,
 ) -> DiscoveryPipelineResult:
     profile = load_profile(profile_path)
     database = JobDatabase(database_path)
     database.reconcile_stale_discovery_runs()
+    baseline_run = database.latest_completed_discovery_run()
+    for source in sources:
+        plan = build_source_plan(source.name, database.recent_source_metrics(source.name),
+                                 getattr(source, "target_priority", "normal"),
+                                 cooldown_hours=cooldown_hours, exploration_hours=exploration_hours)
+        source.priority_tier, source.source_value_score = plan.tier, plan.value_score
+        source.cooldown_until, source.skip_reason = plan.cooldown_until, plan.skip_reason
     run_id = database.create_discovery_run([source.name for source in sources])
     discovery = DiscoveryResult()
     processed = PipelineResult([], 0, 0)
@@ -67,6 +78,7 @@ def run_discovery_pipeline(
             max_age_days=max_age_days,
             priority_fresh_days=profile.priority_fresh_days,
             max_workers=max_workers, target_timeout_seconds=target_timeout_seconds,
+            run_budget_seconds=run_budget_seconds,
         )
         existing_urls = {job.url for job in discovery.jobs if database.get_job(url=job.url) is not None}
         processed = process_jobs(discovery.jobs, profile_path, database_path)
@@ -75,6 +87,12 @@ def run_discovery_pipeline(
             stat.updated_jobs = sum(url in existing_urls for url in source_urls)
             stat.new_jobs = len(source_urls) - stat.updated_jobs
         counts = {decision: sum(job.decision == decision for job in processed.jobs) for decision in ("APPLY", "REVIEW", "REJECT")}
+        if baseline_run:
+            current_relevant = sum(stat.role_relevant for stat in discovery.stats.values())
+            relevant_ok = current_relevant >= .6 * int(baseline_run.get("role_relevant") or 0)
+            actionable = counts["APPLY"] + counts["REVIEW"]
+            baseline_actionable = int(baseline_run.get("apply_count") or 0) + int(baseline_run.get("review_count") or 0)
+            discovery.quality_guard = "PASS" if relevant_ok and actionable >= .7 * baseline_actionable else "WARNING"
         funnel = {name: sum(getattr(stat, name) for stat in discovery.stats.values())
                   for name in ("fetched", "fresh", "geo_eligible", "role_relevant", "deduped", "scored")}
         filter_reasons = {reason: sum(stat.filter_reasons[reason] for stat in discovery.stats.values())
@@ -103,6 +121,8 @@ def run_discovery_pipeline(
                                             int(bool(stat.error)), stat.fresh_count), fresh=stat.fresh,
                 geo_eligible=stat.geo_eligible, role_relevant=stat.role_relevant, deduped=stat.deduped,
                 new_jobs=stat.new_jobs, updated_jobs=stat.updated_jobs, filter_reasons=stat.filter_reasons,
+                priority_tier=stat.priority_tier, value_score=stat.value_score,
+                cooldown_until=stat.cooldown_until, skipped_reason=stat.skipped_reason,
             )
     except Exception as exc:
         failure = exc
@@ -124,6 +144,9 @@ def run_discovery_pipeline(
             total_elapsed_ms=discovery.total_elapsed_ms, sources_started=discovery.sources_started,
             sources_completed=discovery.sources_completed, sources_failed=discovery.sources_failed,
             sources_timed_out=discovery.sources_timed_out,
+            sources_skipped_budget=discovery.sources_skipped_budget, sources_cooldown=discovery.sources_cooldown,
+            sources_exploration_skipped=discovery.sources_exploration_skipped,
+            quality_guard=discovery.quality_guard,
         )
     if failure is not None:
         raise failure

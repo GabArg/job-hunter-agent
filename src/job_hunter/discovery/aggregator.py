@@ -31,6 +31,10 @@ class SourceStats:
     error: str | None = None
     latency_ms: int = 0
     timed_out: bool = False
+    priority_tier: str = "TIER_2"
+    value_score: float = 30.0
+    cooldown_until: str | None = None
+    skipped_reason: str | None = None
     target: str | None = None
     sector: str = "Other"
     apply_count: int = 0
@@ -67,6 +71,10 @@ class DiscoveryResult:
     sources_completed: int = 0
     sources_failed: int = 0
     sources_timed_out: int = 0
+    sources_skipped_budget: int = 0
+    sources_cooldown: int = 0
+    sources_exploration_skipped: int = 0
+    quality_guard: str = "NOT_EVALUATED"
 
     @property
     def duplicates(self) -> int:
@@ -91,35 +99,58 @@ class DiscoveryAggregator:
         priority_fresh_days: int = 3,
         max_workers: int = 6,
         target_timeout_seconds: float = 45.0,
+        run_budget_seconds: float | None = 120.0,
     ) -> DiscoveryResult:
         query_list = [queries] if isinstance(queries, str) else queries
         started_all = perf_counter()
         ordered_sources = sorted(self.sources, key=lambda source: (source.name.casefold(), getattr(source, "target_id", "")))
-        result = DiscoveryResult(stats={source.name: SourceStats() for source in ordered_sources},
-                                 sources_started=len(ordered_sources))
+        result = DiscoveryResult(stats={source.name: SourceStats() for source in ordered_sources})
         collected: dict[str, list[RawJob]] = {}
         workers = max(1, min(int(max_workers), len(ordered_sources) or 1))
-        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="discovery") as executor:
-            futures = {executor.submit(_collect_source, source, query_list, location, limit): source
-                       for source in ordered_sources}
-            for future in as_completed(futures):
-                source = futures[future]; stat = result.stats[source.name]
-                stat.target = getattr(source, "target_id", source.name)
-                stat.sector = getattr(source, "sector", "Other")
-                try:
-                    source_jobs, stat.latency_ms = future.result()
-                    collected[source.name] = source_jobs
-                    if stat.latency_ms > target_timeout_seconds * 1000:
-                        stat.timed_out = True
-                        stat.error = f"TargetTimeout: elapsed {stat.latency_ms}ms exceeded {target_timeout_seconds:g}s"
-                        stat.filter_reasons["source_error"] += 1
-                except Exception as exc:
-                    logger.warning("Discovery source %s failed: %s", source.name, exc)
-                    stat.error = f"{type(exc).__name__}: {exc}"
-                    stat.timed_out = isinstance(exc, (TimeoutError,)) or "timed out" in str(exc).casefold()
-                    stat.filter_reasons["source_error"] += 1
-                    collected[source.name] = []
-                result.sources_completed += 1
+        deadline = started_all + run_budget_seconds if run_budget_seconds is not None else None
+        runnable: dict[str, list[JobSource]] = {tier: [] for tier in ("TIER_1", "TIER_2", "TIER_3")}
+        for source in ordered_sources:
+            stat = result.stats[source.name]
+            stat.target = getattr(source, "target_id", source.name); stat.sector = getattr(source, "sector", "Other")
+            stat.priority_tier = getattr(source, "priority_tier", "TIER_2")
+            stat.value_score = float(getattr(source, "source_value_score", 30.0))
+            stat.cooldown_until = getattr(source, "cooldown_until", None)
+            stat.skipped_reason = getattr(source, "skip_reason", None)
+            if stat.skipped_reason:
+                collected[source.name] = []
+                result.sources_cooldown += int(stat.skipped_reason == "COOLDOWN")
+                result.sources_exploration_skipped += int(stat.skipped_reason == "EXPLORATION_NOT_DUE")
+            else:
+                runnable[stat.priority_tier].append(source)
+        for tier in ("TIER_1", "TIER_2", "TIER_3"):
+            tier_sources = sorted(runnable[tier], key=lambda source: (
+                -float(getattr(source, "source_value_score", 30)), source.name.casefold()))
+            for offset in range(0, len(tier_sources), workers):
+                batch = tier_sources[offset:offset + workers]
+                if deadline is not None and perf_counter() >= deadline:
+                    for source in tier_sources[offset:]:
+                        result.stats[source.name].skipped_reason = "SKIPPED_BUDGET"; collected[source.name] = []
+                        result.sources_skipped_budget += 1
+                    break
+                result.sources_started += len(batch)
+                with ThreadPoolExecutor(max_workers=len(batch), thread_name_prefix="discovery") as executor:
+                    futures = {executor.submit(_collect_source, source, query_list, location, limit): source for source in batch}
+                    for future in as_completed(futures):
+                        source = futures[future]; stat = result.stats[source.name]
+                        try:
+                            source_jobs, stat.latency_ms = future.result()
+                            collected[source.name] = source_jobs
+                            if stat.latency_ms > target_timeout_seconds * 1000:
+                                stat.timed_out = True
+                                stat.error = f"TargetTimeout: elapsed {stat.latency_ms}ms exceeded {target_timeout_seconds:g}s"
+                                stat.filter_reasons["source_error"] += 1
+                        except Exception as exc:
+                            logger.warning("Discovery source %s failed: %s", source.name, exc)
+                            stat.error = f"{type(exc).__name__}: {exc}"
+                            stat.timed_out = isinstance(exc, TimeoutError) or "timed out" in str(exc).casefold()
+                            stat.filter_reasons["source_error"] += 1
+                            collected[source.name] = []
+                        result.sources_completed += 1
         result.sources_failed = sum(bool(stat.error) for stat in result.stats.values())
         result.sources_timed_out = sum(stat.timed_out for stat in result.stats.values())
         seen_urls: set[str] = set()

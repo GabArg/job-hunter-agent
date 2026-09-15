@@ -30,6 +30,9 @@ def build_parser() -> argparse.ArgumentParser:
     discover.add_argument("--max-age-days", type=int, default=14, help="Maximum posting age (default: 14)")
     discover.add_argument("--max-workers", type=int, default=6, help="Concurrent source workers (default: 6)")
     discover.add_argument("--target-timeout", type=float, default=45.0, help="Operational target timeout in seconds")
+    discover.add_argument("--run-budget", type=float, default=120.0, help="Global run start budget in seconds")
+    discover.add_argument("--cooldown-hours", type=float, default=12.0)
+    discover.add_argument("--exploration-hours", type=float, default=12.0)
     discover.add_argument(
         "--source", action="append",
         choices=("remoteok", "arbeitnow", "greenhouse", "lever", "ashby", "workable", "smartrecruiters", "recruitee", "generic"),
@@ -138,6 +141,8 @@ def main() -> None:
                     queries=queries or None, location=args.location, limit=args.limit,
                     max_age_days=args.max_age_days,
                     max_workers=args.max_workers, target_timeout_seconds=args.target_timeout,
+                    run_budget_seconds=args.run_budget, cooldown_hours=args.cooldown_hours,
+                    exploration_hours=args.exploration_hours,
                 )
         except DiscoveryAlreadyRunning as exc:
             print(str(exc)); return
@@ -145,6 +150,10 @@ def main() -> None:
         print(f"Performance: elapsed_ms={result.discovery.total_elapsed_ms} "
               f"sources_started={result.discovery.sources_started} sources_completed={result.discovery.sources_completed} "
               f"sources_failed={result.discovery.sources_failed} sources_timed_out={result.discovery.sources_timed_out}")
+        print(f"Scheduling: skipped_budget={result.discovery.sources_skipped_budget} "
+              f"cooldown={result.discovery.sources_cooldown} "
+              f"exploration_not_due={result.discovery.sources_exploration_skipped}")
+        print(f"Quality guard: {result.discovery.quality_guard}")
         for name, stat in result.discovery.stats.items():
             status = f"ERROR {stat.error}" if stat.error else "OK"
             print(
@@ -153,7 +162,8 @@ def main() -> None:
                 f"deduped={stat.deduped} new={stat.new_jobs} updated={stat.updated_jobs} "
                 f"description_relevant={stat.relevant_after_description} pre_score_rejected={stat.rejected_pre_score} "
                 f"scored={stat.scored} APPLY={stat.apply_count} REVIEW={stat.review_count} REJECT={stat.reject_count} "
-                f"duplicates={stat.duplicates} filters={stat.filter_reasons} latency_ms={stat.latency_ms} status={status}"
+                f"duplicates={stat.duplicates} tier={stat.priority_tier} value={stat.value_score} "
+                f"skip={stat.skipped_reason or '-'} filters={stat.filter_reasons} latency_ms={stat.latency_ms} status={status}"
             )
     elif args.command == "tracking-summary":
         from .tracking import analytics_snapshot
