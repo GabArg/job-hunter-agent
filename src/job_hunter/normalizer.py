@@ -5,7 +5,7 @@ import unicodedata
 from typing import Any
 
 from .models import Job
-from .semantics import canonicalize_terms, classify_requirement_concepts, detect_concepts, detect_roles
+from .semantics import canonicalize_terms, classify_requirement_concepts, classify_role, detect_concepts, detect_roles
 
 SENIORITY_PATTERNS = {
     "principal": r"\bprincipal\b",
@@ -42,7 +42,9 @@ def clean_text(value: str) -> str:
 
 
 def normalize_job(job: Job, known_skills: list[str] | None = None) -> Job:
+    job.title_original = job.title_original or job.title
     job.title = clean_text(job.title)
+    job.title_normalized = job.title
     job.company = (job.company or "").strip()
     job.location = clean_text(job.location)
     job.work_mode = normalize_work_mode(job.work_mode, job.description, job.raw_data)
@@ -65,6 +67,9 @@ def normalize_job(job: Job, known_skills: list[str] | None = None) -> Job:
     candidate_concepts = canonicalize_terms(known_skills or [])
     job.detected_skills = [concept for concept in job.job_requirements if concept in candidate_concepts]
     roles = detect_roles(job.title, job.description)
+    catalog_role = classify_role(job.title)
+    job.canonical_role = catalog_role.canonical_title if catalog_role else None
+    job.role_family = catalog_role.family if catalog_role else None
     subtypes = [role for role in roles if role.startswith("business-analyst-")]
     job.role_subtype = sorted(subtypes)[0] if subtypes else (sorted(roles)[0] if roles else None)
     return job

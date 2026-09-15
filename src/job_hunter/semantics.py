@@ -4,6 +4,8 @@ import re
 import unicodedata
 from collections.abc import Iterable
 
+from .role_catalog import ROLE_CATALOG, RoleDefinition
+
 # One canonical vocabulary shared by normalization, scoring, discovery and UI.
 CONCEPT_ALIASES: dict[str, tuple[str, ...]] = {
     "data-analysis": ("data analysis", "análisis de datos", "analisis de datos", "análisis de información", "analisis de informacion"),
@@ -43,15 +45,14 @@ CONCEPT_ALIASES: dict[str, tuple[str, ...]] = {
     "domo": ("domo",),
 }
 
+def _role_key(role: RoleDefinition) -> str:
+    plain = unicodedata.normalize("NFKD", role.canonical_title).encode("ascii", "ignore").decode().casefold()
+    return re.sub(r"[^a-z0-9]+", "-", plain).strip("-")
+
+
 ROLE_ALIASES: dict[str, tuple[str, ...]] = {
-    "data-analyst": ("data analyst", "junior data analyst", "jr data analyst", "analytics analyst", "data & reporting analyst", "insights analyst", "analista de datos", "analista de información", "analista de informacion", "reporting analyst", "analista de reporting"),
-    "business-analyst": ("business analyst", "analista de negocios"),
-    "business-analyst-functional": ("analista funcional", "functional analyst"),
-    "business-analyst-operations": ("analista de procesos", "business process analyst"),
-    "pricing-analyst": ("pricing analyst", "analista de pricing", "analista de precios"),
-    "commercial-analyst": ("analista comercial", "commercial analyst"),
-    "operations-analyst": ("operations analyst", "analista de operaciones", "analista de procesos"),
-    "bi-analyst": ("bi analyst", "business intelligence analyst", "analista bi", "analista de business intelligence", "analista de inteligencia de negocio"),
+    _role_key(role): tuple(value.casefold() for value in role.all_titles)
+    for role in ROLE_CATALOG
 }
 
 DISPLAY_NAMES = {concept: concept.replace("-", " ").title() for concept in CONCEPT_ALIASES}
@@ -177,6 +178,11 @@ def detect_roles(title: str, description: str = "") -> set[str]:
         if any(_role_alias_matches(title, alias) for alias in aliases)
     }
     requirements = set(detect_concepts(description))
+    normalized_title = normalize_semantic_text(title)
+    if any(_phrase(normalized_title, alias) for alias in ("analista funcional", "functional analyst")):
+        roles.add("business-analyst-functional")
+    if any(_phrase(normalized_title, alias) for alias in ("analista de procesos", "business process analyst")):
+        roles.add("business-analyst-operations")
     if "commercial-analyst" in roles and requirements & {"pricing", "profitability", "sales-analysis", "cost-analysis"}:
         roles.add("pricing-analyst")
     if roles & {"business-analyst", "business-analyst-functional", "business-analyst-operations"}:
@@ -198,11 +204,21 @@ def expand_target_roles(roles: Iterable[str]) -> list[str]:
     expanded: list[str] = []
     for role in roles:
         canonical = detect_concepts(role, ROLE_ALIASES)
+        if "data-analyst" in canonical:
+            canonical.extend(("analytics-analyst", "reporting-analyst"))
+        if "bi-analyst" in canonical:
+            canonical.append("business-intelligence-analyst")
         aliases = [alias for concept in canonical for alias in ROLE_ALIASES[concept]]
         expanded.extend(aliases or [role])
-        if "business-analyst" in canonical: expanded.extend((*ROLE_ALIASES["business-analyst-functional"], *ROLE_ALIASES["business-analyst-operations"]))
-        if "pricing-analyst" in canonical: expanded.extend(ROLE_ALIASES["commercial-analyst"])
     return list(dict.fromkeys(expanded))
+
+
+def classify_role(title: str) -> RoleDefinition | None:
+    """Return the most specific catalog role without altering seniority."""
+    matches = [role for role in ROLE_CATALOG if any(_role_alias_matches(title, alias) for alias in role.all_titles)]
+    if not matches:
+        return None
+    return max(matches, key=lambda role: max(len(normalize_semantic_text(alias)) for alias in role.all_titles))
 
 
 def display_concepts(concepts: Iterable[str]) -> list[str]:
@@ -215,7 +231,12 @@ def _phrase(text: str, phrase: str) -> bool:
 
 
 def _role_alias_matches(title: str, alias: str) -> bool:
-    stop = {"de", "del", "y", "and", "junior", "jr", "semi", "senior", "ssr", "sr"}
-    title_tokens = set(normalize_semantic_text(title).replace("-", " ").split()) - stop
-    alias_tokens = set(normalize_semantic_text(alias).replace("-", " ").split()) - stop
-    return bool(alias_tokens and alias_tokens <= title_tokens)
+    normalized_title = normalize_semantic_text(title).replace("-", " ")
+    normalized_alias = normalize_semantic_text(alias).replace("-", " ")
+    ignored = {"de", "del", "y", "and", "junior", "jr", "senior", "sr", "semi", "ssr"}
+    tokens = [token for token in normalized_alias.split() if token not in ignored]
+    if not tokens:
+        return False
+    separator = r"(?:\s+(?:de|del|y|and|junior|jr|senior|sr|semi|ssr))*\s+"
+    pattern = separator.join(re.escape(token) for token in tokens)
+    return bool(re.search(rf"(?<![a-z0-9]){pattern}(?![a-z0-9])", normalized_title))

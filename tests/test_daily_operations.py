@@ -107,3 +107,20 @@ def test_legacy_database_migrates_without_losing_row(tmp_path):
         connection.execute("INSERT INTO jobs VALUES (1,'A','B','C','Remote','D','x','u',80,'APPLY','{}','2026-01-01T00:00:00+00:00')")
     database = JobDatabase(path); row = database.list_jobs()[0]
     assert row["id"] == 1 and row["application_status"] == "NEW" and row["first_seen_at"] == row["created_at"]
+    with sqlite3.connect(path) as connection:
+        columns = {column[1] for column in connection.execute("PRAGMA table_info(jobs)")}
+    assert {"title_original", "title_normalized", "canonical_role", "role_family"} <= columns
+
+    migrated = job("https://example.test/migrated")
+    migrated.title_original = "Junior Data Scientist"
+    migrated.title_normalized = "junior data scientist"
+    migrated.canonical_role = "Data Scientist"
+    migrated.role_family = "exploratory"
+    assert database.upsert(migrated)
+    migrated.title_original = "Data Scientist Jr"
+    assert not database.upsert(migrated)
+    rows = database.list_jobs()
+    assert {item["id"] for item in rows} >= {1}
+    persisted = next(item for item in rows if item["url"] == migrated.url)
+    assert persisted["title_original"] == "Data Scientist Jr"
+    assert (persisted["canonical_role"], persisted["role_family"]) == ("Data Scientist", "exploratory")

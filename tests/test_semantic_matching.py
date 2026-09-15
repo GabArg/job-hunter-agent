@@ -11,6 +11,7 @@ from job_hunter.discovery.matching import normalize_datetime, parse_datetime, ti
 from job_hunter.discovery.sources.lever import LeverSource
 from job_hunter.models import Job
 from job_hunter.normalizer import normalize_job
+from job_hunter.pipeline import _profile_aliases
 from job_hunter.scorer import normalize_reason_list, score_job
 from job_hunter.semantics import detect_concepts, detect_roles, expand_target_roles, roles_match
 
@@ -121,6 +122,8 @@ def test_semantic_reasons_survive_rediscovery_without_status_reset(tmp_path):
     database.upsert(job); refreshed = database.get_job_row(row["id"])
     assert refreshed["application_status"] == "SHORTLISTED"
     assert "uml" in refreshed["reasons"]
+    assert refreshed["title_original"] == "Ssr Business Analyst"
+    assert (refreshed["canonical_role"], refreshed["role_family"]) == ("Business Analyst", "core")
 
 
 def test_functional_analyst_is_business_affinity_not_data_by_default():
@@ -128,3 +131,72 @@ def test_functional_analyst_is_business_affinity_not_data_by_default():
     assert "business-analyst-functional" in roles
     assert "business-analyst-data" not in roles
     assert title_matches("Analista Funcional", ["Business Analyst"], "Historias de usuario")
+
+
+@pytest.mark.parametrize(("title", "canonical", "family"), [
+    ("Data Analyst", "Data Analyst", "core"),
+    ("Analista de Datos", "Data Analyst", "core"),
+    ("Business Intelligence Analyst", "Business Intelligence Analyst", "core"),
+    ("Commercial Data Analyst", "Commercial Data Analyst", "strong_expansion"),
+    ("Data Quality Analyst", "Data Quality Analyst", "strong_expansion"),
+    ("Junior Data Scientist", "Data Scientist", "exploratory"),
+    ("Data Scientist Jr", "Data Scientist", "exploratory"),
+    ("Junior Machine Learning Analyst", "Machine Learning Analyst", "exploratory"),
+    ("Senior Machine Learning Analyst", "Machine Learning Analyst", "exploratory"),
+    ("Junior BI Consultant", "BI Consultant", "exploratory"),
+    ("AI Automation Analyst", "AI Automation Analyst", "exploratory"),
+    ("Product Analyst", "Product Analyst", "strong_expansion"),
+    ("aNaLiStA DE dAtOs", "Data Analyst", "core"),
+    ("  Analista,   de Datos  ", "Data Analyst", "core"),
+])
+def test_catalog_title_normalization(title, canonical, family):
+    job = normalize_job(Job(title, "X", "Argentina", "Remote", "SQL", "test", f"https://x/{canonical}/{title}"))
+    assert (job.canonical_role, job.role_family) == (canonical, family)
+    assert job.title_original == title
+    assert job.title_normalized == job.title
+
+
+@pytest.mark.parametrize("title", ["Product Manager", "Sales Executive", "Data Engineer"])
+def test_catalog_does_not_match_neighboring_roles(title):
+    job = normalize_job(Job(title, "X", "Argentina", "Remote", "SQL", "test", f"https://x/{title}"))
+    assert job.canonical_role is None
+    assert not title_matches(title, _profile_aliases(PROFILE))
+
+
+def test_senior_exploratory_title_keeps_seniority_and_hard_reject_priority():
+    job = normalize_job(Job("Senior Data Scientist", "X", "Argentina", "Remote", "SQL", "test", "https://x/senior-ds"), PROFILE.skills)
+    assert title_matches(job.title, _profile_aliases(PROFILE))
+    assert job.canonical_role == "Data Scientist" and job.seniority == "senior"
+    result = score_job(job, PROFILE)
+    assert result.decision == "REJECT"
+    assert any("Senioridad" in reason for reason in result.hard_reject_reasons)
+
+
+@pytest.mark.parametrize(("title", "canonical", "seniority"), [
+    ("Junior Data Scientist", "Data Scientist", "junior"),
+    ("Data Scientist Jr", "Data Scientist", "junior"),
+    ("Junior Machine Learning Analyst", "Machine Learning Analyst", "junior"),
+    ("Senior Machine Learning Analyst", "Machine Learning Analyst", "senior"),
+    ("Junior BI Consultant", "BI Consultant", "junior"),
+])
+def test_canonical_role_is_independent_from_seniority(title, canonical, seniority):
+    job = normalize_job(Job(title, "X", "Argentina", "Remote", "SQL", "test", f"https://x/{title}"))
+    assert job.canonical_role == canonical
+    assert job.seniority == seniority
+    assert job.role_family == "exploratory"
+
+
+def test_exploratory_title_does_not_bypass_mandatory_requirements():
+    job = normalize_job(Job("AI Automation Analyst", "X", "Argentina", "Remote",
+                            "Domo obligatorio", "test", "https://x/automation"), PROFILE.skills)
+    result = score_job(job, PROFILE)
+    assert result.decision == "REJECT"
+    assert "Requisito excluyente faltante: Domo" in result.hard_reject_reasons
+
+
+def test_catalog_queries_are_ordered_and_semantically_deduplicated():
+    queries = _profile_aliases(PROFILE)
+    normalized = [" ".join(query.casefold().split()) for query in queries]
+    assert len(normalized) == len(set(normalized))
+    assert queries.index("Data Analyst") < queries.index("Commercial Data Analyst") < queries.index("Junior Data Scientist")
+    assert {"Junior Data Scientist", "Data Scientist Jr", "Junior Machine Learning Analyst", "Junior BI Consultant"} <= set(queries)

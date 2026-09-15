@@ -217,9 +217,14 @@ def job_published_timestamp(job: Job) -> float:
 
 
 def _profile_aliases(profile) -> list[str]:
-    from .semantics import expand_target_roles
+    from .role_catalog import discovery_titles
+    from .semantics import normalize_semantic_text
     aliases = [alias for values in profile.query_groups.values() for alias in values]
-    return list(dict.fromkeys([*(aliases or profile.search_queries), *expand_target_roles(profile.target_roles)]))
+    ordered = [*discovery_titles(), *aliases, *profile.search_queries]
+    unique: dict[str, str] = {}
+    for title in ordered:
+        unique.setdefault(normalize_semantic_text(title), title)
+    return list(unique.values())
 
 
 def _read_csv(path: str | Path) -> list[Job]:

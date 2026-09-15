@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     email_draft_status TEXT NOT NULL DEFAULT 'NOT_GENERATED', email_sent_at TEXT,
     email_message_id TEXT, selected_application_channel TEXT, application_channel_used TEXT,
     gmail_draft_id TEXT, gmail_message_id TEXT, gmail_draft_created_at TEXT, gmail_account_email TEXT
+    ,title_original TEXT, title_normalized TEXT, canonical_role TEXT, role_family TEXT
     ,application_stage TEXT NOT NULL DEFAULT 'NOT_APPLIED', stage_updated_at TEXT,
     last_contact_at TEXT, next_action_at TEXT, next_action_note TEXT,
     rejection_reason TEXT, offer_notes TEXT
@@ -145,6 +146,8 @@ class JobDatabase:
                 "application_stage": "TEXT NOT NULL DEFAULT 'NOT_APPLIED'", "stage_updated_at": "TEXT",
                 "last_contact_at": "TEXT", "next_action_at": "TEXT", "next_action_note": "TEXT",
                 "rejection_reason": "TEXT", "offer_notes": "TEXT",
+                "title_original": "TEXT", "title_normalized": "TEXT",
+                "canonical_role": "TEXT", "role_family": "TEXT",
             }
             for name, definition in migrations.items():
                 if name not in columns: connection.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
@@ -201,7 +204,8 @@ class JobDatabase:
             job.application_url, job.application_instructions = detected.application_url, detected.instructions
             job.email_subject = detected.required_subject
         seen_at = job.discovered_at or utc_now()
-        values = (job.title, job.company, job.location, job.work_mode, job.description, job.source, job.url,
+        values = (job.title, job.title_original, job.title_normalized, job.canonical_role, job.role_family,
+                  job.company, job.location, job.work_mode, job.description, job.source, job.url,
                   job.published_at, seen_at, job.score, job.decision, json.dumps(job.reasons, ensure_ascii=False),
                   job.created_at, seen_at, seen_at, seen_at, job.application_method, job.application_email,
                   job.application_url, json.dumps(job.application_instructions, ensure_ascii=False), job.email_subject,
@@ -210,13 +214,16 @@ class JobDatabase:
         with self._connect() as connection:
             existed = connection.execute("SELECT 1 FROM jobs WHERE url = ?", (job.url,)).fetchone()
             connection.execute("""
-                INSERT INTO jobs (title, company, location, work_mode, description, source, url, published_at,
+                INSERT INTO jobs (title, title_original, title_normalized, canonical_role, role_family,
+                    company, location, work_mode, description, source, url, published_at,
                     discovered_at, score, decision, reasons, created_at, first_seen_at, last_seen_at, last_scored_at,
                     application_method, application_email, application_url, application_instructions, email_subject,
                     sector, sector_confidence, priority_fresh, imported_manually, imported_at, import_source_url, import_method)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(url) DO UPDATE SET
-                    title=excluded.title, company=excluded.company, location=excluded.location,
+                    title=excluded.title, title_original=excluded.title_original,
+                    title_normalized=excluded.title_normalized, canonical_role=excluded.canonical_role,
+                    role_family=excluded.role_family, company=excluded.company, location=excluded.location,
                     work_mode=excluded.work_mode, description=excluded.description, source=excluded.source,
                     published_at=excluded.published_at, score=excluded.score, decision=excluded.decision,
                     reasons=excluded.reasons, last_seen_at=excluded.last_seen_at,
@@ -262,7 +269,9 @@ class JobDatabase:
         with self._connect() as connection: row = connection.execute(f"SELECT * FROM jobs WHERE {query}", (value,)).fetchone()
         if row is None: return None
         data = dict(row)
-        return Job(title=data["title"], company=data["company"], location=data["location"], work_mode=data["work_mode"],
+        return Job(title=data["title"], title_original=data.get("title_original"),
+                   title_normalized=data.get("title_normalized"), canonical_role=data.get("canonical_role"),
+                   role_family=data.get("role_family"), company=data["company"], location=data["location"], work_mode=data["work_mode"],
                    description=data["description"], source=data["source"], url=data["url"], published_at=data.get("published_at"),
                    discovered_at=data.get("discovered_at") or data["created_at"], id=data["id"], score=data["score"],
                    decision=data["decision"], reasons=json.loads(data["reasons"]), created_at=data["created_at"],

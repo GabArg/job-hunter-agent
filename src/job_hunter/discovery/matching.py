@@ -28,11 +28,7 @@ def normalized(value: str) -> str:
 
 
 def title_matches(title: str, aliases: list[str], description: str = "") -> bool:
-    candidate = normalized(title)
-    return any(
-        _phrase_in(candidate, normalized(alias)) or roles_match(title, alias, description)
-        for alias in aliases if alias.strip()
-    )
+    return any(roles_match(title, alias, description) for alias in aliases if alias.strip())
 
 
 def geography_compatible(raw: RawJob, preferred_locations: list[str]) -> tuple[bool, str | None]:

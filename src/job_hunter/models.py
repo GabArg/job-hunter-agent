@@ -19,6 +19,10 @@ class Job:
         default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
     )
     id: int | None = None
+    title_original: str | None = None
+    title_normalized: str | None = None
+    canonical_role: str | None = None
+    role_family: str | None = None
     required_years: float | None = None
     required_english: str | None = None
     seniority: str | None = None
