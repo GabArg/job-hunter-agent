@@ -14,13 +14,13 @@ class AshbySource(JobSource):
         self.company, self.board_token, self._fetcher = company, board_token, fetcher
         self.name, self._payload = f"ashby:{company}", None
 
-    def discover(self, query: str, location: str | None = None, limit: int | None = None) -> list[RawJob]:
+    def discover(self, query: str | list[str], location: str | None = None, limit: int | None = None) -> list[RawJob]:
         if self._payload is None:
             self._payload = self._fetcher(
                 f"https://api.ashbyhq.com/posting-api/job-board/{quote(self.board_token)}?includeCompensation=true")
         results = []
         for item in self._payload.get("jobs", []) if isinstance(self._payload, dict) else []:
-            if not item.get("isListed", True) or not title_matches(str(item.get("title", "")), [query]): continue
+            if not item.get("isListed", True) or not title_matches(str(item.get("title", "")), [query] if isinstance(query, str) else query): continue
             results.append(RawJob(str(item.get("id") or item.get("jobUrl") or ""), str(item.get("title", "")),
                 self.company, str(item.get("location") or ""), "remote" if item.get("isRemote") else "onsite",
                 str(item.get("descriptionPlain") or item.get("descriptionHtml") or ""), self.name,

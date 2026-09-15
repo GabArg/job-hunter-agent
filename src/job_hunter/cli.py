@@ -28,6 +28,8 @@ def build_parser() -> argparse.ArgumentParser:
     discover.add_argument("--location", help="Optional location filter")
     discover.add_argument("--limit", type=int, default=25, help="Maximum matches per target (default: 25)")
     discover.add_argument("--max-age-days", type=int, default=14, help="Maximum posting age (default: 14)")
+    discover.add_argument("--max-workers", type=int, default=6, help="Concurrent source workers (default: 6)")
+    discover.add_argument("--target-timeout", type=float, default=45.0, help="Operational target timeout in seconds")
     discover.add_argument(
         "--source", action="append",
         choices=("remoteok", "arbeitnow", "greenhouse", "lever", "ashby", "workable", "smartrecruiters", "recruitee", "generic"),
@@ -135,10 +137,14 @@ def main() -> None:
                     build_sources(profile, args.source), args.profile, args.database,
                     queries=queries or None, location=args.location, limit=args.limit,
                     max_age_days=args.max_age_days,
+                    max_workers=args.max_workers, target_timeout_seconds=args.target_timeout,
                 )
         except DiscoveryAlreadyRunning as exc:
             print(str(exc)); return
         print(f"Discovered {len(result.jobs)} jobs ({result.inserted} new, {result.updated} existing)")
+        print(f"Performance: elapsed_ms={result.discovery.total_elapsed_ms} "
+              f"sources_started={result.discovery.sources_started} sources_completed={result.discovery.sources_completed} "
+              f"sources_failed={result.discovery.sources_failed} sources_timed_out={result.discovery.sources_timed_out}")
         for name, stat in result.discovery.stats.items():
             status = f"ERROR {stat.error}" if stat.error else "OK"
             print(

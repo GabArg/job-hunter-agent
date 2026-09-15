@@ -15,7 +15,7 @@ class RemoteOKSource(JobSource):
         self._fetcher = fetcher
         self._payload: Any = None
 
-    def discover(self, query: str, location: str | None = None, limit: int | None = None) -> list[RawJob]:
+    def discover(self, query: str | list[str], location: str | None = None, limit: int | None = None) -> list[RawJob]:
         if self._payload is None:
             self._payload = self._fetcher(self.endpoint)
         payload = self._payload
@@ -28,7 +28,8 @@ class RemoteOKSource(JobSource):
             # Discovery is role-led: description/tag matches such as "data" in
             # an engineering job must not consume the per-source coverage cap.
             searchable = str(item.get("position", "")).lower()
-            if query and not _query_matches(query, searchable):
+            queries = [query] if isinstance(query, str) else query
+            if queries and not any(_query_matches(value, searchable) for value in queries):
                 continue
             item_location = str(item.get("location") or "Remote")
             if location and location.lower() not in item_location.lower() and location.lower() != "remote":

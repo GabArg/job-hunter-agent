@@ -28,7 +28,7 @@ class GenericCareersSource(JobSource):
         self._fetcher = fetcher
         self._payload: Any = None
 
-    def discover(self, query: str, location: str | None = None, limit: int | None = None) -> list[RawJob]:
+    def discover(self, query: str | list[str], location: str | None = None, limit: int | None = None) -> list[RawJob]:
         if self._payload is None:
             self._payload = self._fetcher(self.endpoint)
         payload = self._payload
@@ -42,7 +42,8 @@ class GenericCareersSource(JobSource):
             title = str(item.get("title") or item.get("name") or "")
             description = str(item.get("description") or item.get("content") or "")
             item_location = _location(item.get("location"))
-            if not title or not item.get("url") or not _query_matches(query, f"{title} {description}".lower()):
+            queries = [query] if isinstance(query, str) else query
+            if not title or not item.get("url") or not any(_query_matches(value, f"{title} {description}".lower()) for value in queries):
                 continue
             if location and location.lower() not in item_location.lower():
                 continue

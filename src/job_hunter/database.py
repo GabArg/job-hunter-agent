@@ -59,7 +59,9 @@ CREATE TABLE IF NOT EXISTS discovery_runs (
     ,fetched INTEGER NOT NULL DEFAULT 0, fresh INTEGER NOT NULL DEFAULT 0,
     geo_eligible INTEGER NOT NULL DEFAULT 0, role_relevant INTEGER NOT NULL DEFAULT 0,
     deduped INTEGER NOT NULL DEFAULT 0, scored INTEGER NOT NULL DEFAULT 0,
-    filter_reasons TEXT NOT NULL DEFAULT '{}'
+    filter_reasons TEXT NOT NULL DEFAULT '{}', total_elapsed_ms INTEGER NOT NULL DEFAULT 0,
+    sources_started INTEGER NOT NULL DEFAULT 0, sources_completed INTEGER NOT NULL DEFAULT 0,
+    sources_failed INTEGER NOT NULL DEFAULT 0, sources_timed_out INTEGER NOT NULL DEFAULT 0
 )
 """
 SOURCE_METRICS_SCHEMA = """
@@ -148,6 +150,9 @@ class JobDatabase:
                 "geo_eligible": "INTEGER NOT NULL DEFAULT 0", "role_relevant": "INTEGER NOT NULL DEFAULT 0",
                 "deduped": "INTEGER NOT NULL DEFAULT 0", "scored": "INTEGER NOT NULL DEFAULT 0",
                 "filter_reasons": "TEXT NOT NULL DEFAULT '{}'",
+                "total_elapsed_ms": "INTEGER NOT NULL DEFAULT 0", "sources_started": "INTEGER NOT NULL DEFAULT 0",
+                "sources_completed": "INTEGER NOT NULL DEFAULT 0", "sources_failed": "INTEGER NOT NULL DEFAULT 0",
+                "sources_timed_out": "INTEGER NOT NULL DEFAULT 0",
             }.items():
                 if name not in run_columns: connection.execute(f"ALTER TABLE discovery_runs ADD COLUMN {name} {definition}")
             metric_columns = {row[1] for row in connection.execute("PRAGMA table_info(source_metrics)")}
@@ -446,20 +451,54 @@ class JobDatabase:
                                         (started_at or utc_now(), "RUNNING", json.dumps(sources)))
             return int(cursor.lastrowid)
 
+    def reconcile_stale_discovery_runs(self, max_age_hours: float = 2.0,
+                                       now: datetime | None = None) -> list[int]:
+        reference = now or datetime.now(timezone.utc)
+        threshold = reference - timedelta(hours=max_age_hours)
+        recovered: list[int] = []
+        with self._connect() as connection:
+            rows = connection.execute("SELECT id,started_at,errors FROM discovery_runs WHERE status='RUNNING'").fetchall()
+            for row in rows:
+                started = datetime.fromisoformat(row["started_at"].replace("Z", "+00:00"))
+                started = started.replace(tzinfo=started.tzinfo or timezone.utc).astimezone(timezone.utc)
+                if started >= threshold:
+                    continue
+                errors = json.loads(row["errors"] or "{}")
+                errors["recovery"] = "stale_run_recovered"
+                cursor = connection.execute(
+                    "UPDATE discovery_runs SET status='ABORTED',finished_at=?,errors=? WHERE id=? AND status='RUNNING'",
+                    (reference.isoformat(timespec="seconds"), json.dumps(errors), row["id"]))
+                if cursor.rowcount: recovered.append(int(row["id"]))
+        return recovered
+
+    def abort_discovery_run(self, run_id: int, reason: str) -> bool:
+        with self._connect() as connection:
+            row = connection.execute("SELECT errors FROM discovery_runs WHERE id=? AND status='RUNNING'", (run_id,)).fetchone()
+            if row is None: return False
+            errors = json.loads(row["errors"] or "{}"); errors["abort"] = reason
+            cursor = connection.execute(
+                "UPDATE discovery_runs SET status='ABORTED',finished_at=?,errors=? WHERE id=? AND status='RUNNING'",
+                (utc_now(), json.dumps(errors), run_id))
+            return cursor.rowcount == 1
+
     def finish_discovery_run(self, run_id: int, *, status: str, preliminary: int = 0, new_jobs: int = 0,
                              updated_jobs: int = 0, duplicates: int = 0, apply_count: int = 0,
                              review_count: int = 0, reject_count: int = 0, errors: dict | None = None,
                              fetched: int = 0, fresh: int = 0, geo_eligible: int = 0,
                              role_relevant: int = 0, deduped: int = 0, scored: int = 0,
-                             filter_reasons: dict | None = None) -> None:
+                             filter_reasons: dict | None = None, total_elapsed_ms: int = 0,
+                             sources_started: int = 0, sources_completed: int = 0,
+                             sources_failed: int = 0, sources_timed_out: int = 0) -> None:
         with self._connect() as connection:
             connection.execute("""UPDATE discovery_runs SET finished_at=?,status=?,preliminary=?,new_jobs=?,updated_jobs=?,
                 duplicates=?,apply_count=?,review_count=?,reject_count=?,errors=?,fetched=?,fresh=?,
-                geo_eligible=?,role_relevant=?,deduped=?,scored=?,filter_reasons=? WHERE id=?""",
+                geo_eligible=?,role_relevant=?,deduped=?,scored=?,filter_reasons=?,total_elapsed_ms=?,
+                sources_started=?,sources_completed=?,sources_failed=?,sources_timed_out=? WHERE id=? AND status='RUNNING'""",
                 (utc_now(), status, preliminary, new_jobs, updated_jobs, duplicates, apply_count,
                  review_count, reject_count, json.dumps(errors or {}, ensure_ascii=False), fetched, fresh,
                  geo_eligible, role_relevant, deduped, scored,
-                 json.dumps(filter_reasons or {}, ensure_ascii=False), run_id))
+                 json.dumps(filter_reasons or {}, ensure_ascii=False), total_elapsed_ms, sources_started,
+                 sources_completed, sources_failed, sources_timed_out, run_id))
 
     def list_discovery_runs(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._connect() as connection:
@@ -471,7 +510,7 @@ class JobDatabase:
 
     def source_metrics_for_run(self, run_id: int) -> list[dict[str, Any]]:
         with self._connect() as connection:
-            rows = connection.execute("SELECT * FROM source_metrics WHERE run_id=? ORDER BY source", (run_id,)).fetchall()
+            rows = connection.execute("SELECT * FROM source_metrics WHERE run_id=? ORDER BY latency_ms DESC,source", (run_id,)).fetchall()
         return [dict(row) for row in rows]
 
     def latest_discovery_jobs(self) -> list[dict[str, Any]]:
@@ -515,8 +554,10 @@ class JobDatabase:
         query = f"""SELECT source,target,sector,SUM(fetched) fetched,SUM(relevant_after_description) relevant,
             SUM(apply_count) apply_count,SUM(review_count) review_count,SUM(reject_count) reject_count,
             SUM(duplicates) duplicates,SUM(errors) errors,ROUND(AVG(quality_score),2) quality_score,
-            MAX(recorded_at) last_run, MAX(last_success_at) last_success_at,
+            MAX(recorded_at) last_run, MAX(last_success_at) last_success_at, ROUND(AVG(latency_ms)) average_latency_ms,
             (SELECT last_jobs_count FROM source_metrics recent WHERE recent.source=source_metrics.source ORDER BY id DESC LIMIT 1) last_jobs_count,
+            (SELECT latency_ms FROM source_metrics recent WHERE recent.source=source_metrics.source ORDER BY id DESC LIMIT 1) last_latency_ms,
+            (SELECT consecutive_failures FROM source_metrics recent WHERE recent.source=source_metrics.source ORDER BY id DESC LIMIT 1) consecutive_failures,
             (SELECT health FROM source_metrics recent WHERE recent.source=source_metrics.source ORDER BY id DESC LIMIT 1) health
             FROM source_metrics {condition} GROUP BY source,target,sector ORDER BY quality_score DESC"""
         with self._connect() as connection: rows = connection.execute(query, values).fetchall()

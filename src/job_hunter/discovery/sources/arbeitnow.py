@@ -17,7 +17,7 @@ class ArbeitnowSource(JobSource):
         self._fetcher = fetcher
         self._payload: Any = None
 
-    def discover(self, query: str, location: str | None = None, limit: int | None = None) -> list[RawJob]:
+    def discover(self, query: str | list[str], location: str | None = None, limit: int | None = None) -> list[RawJob]:
         url = f"{self.endpoint}?{urlencode({'page': 1})}"
         if self._payload is None:
             self._payload = self._fetcher(url)
@@ -27,7 +27,8 @@ class ArbeitnowSource(JobSource):
         jobs: list[RawJob] = []
         for item in payload["data"]:
             searchable = str(item.get("title", "")).lower()
-            if query and not _query_matches(query, searchable):
+            queries = [query] if isinstance(query, str) else query
+            if queries and not any(_query_matches(value, searchable) for value in queries):
                 continue
             item_location = str(item.get("location") or ("Remote" if item.get("remote") else ""))
             if location and location.lower() not in item_location.lower() and not (

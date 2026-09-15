@@ -4,6 +4,7 @@ import html
 import logging
 import re
 import hashlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import perf_counter
 from dataclasses import dataclass, field
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -29,6 +30,7 @@ class SourceStats:
     duplicates: int = 0
     error: str | None = None
     latency_ms: int = 0
+    timed_out: bool = False
     target: str | None = None
     sector: str = "Other"
     apply_count: int = 0
@@ -60,6 +62,11 @@ class SourceStats:
 class DiscoveryResult:
     jobs: list[Job] = field(default_factory=list)
     stats: dict[str, SourceStats] = field(default_factory=dict)
+    total_elapsed_ms: int = 0
+    sources_started: int = 0
+    sources_completed: int = 0
+    sources_failed: int = 0
+    sources_timed_out: int = 0
 
     @property
     def duplicates(self) -> int:
@@ -82,21 +89,46 @@ class DiscoveryAggregator:
         preferred_locations: list[str] | None = None,
         max_age_days: int | None = 14,
         priority_fresh_days: int = 3,
+        max_workers: int = 6,
+        target_timeout_seconds: float = 45.0,
     ) -> DiscoveryResult:
         query_list = [queries] if isinstance(queries, str) else queries
-        result = DiscoveryResult(stats={source.name: SourceStats() for source in self.sources})
+        started_all = perf_counter()
+        ordered_sources = sorted(self.sources, key=lambda source: (source.name.casefold(), getattr(source, "target_id", "")))
+        result = DiscoveryResult(stats={source.name: SourceStats() for source in ordered_sources},
+                                 sources_started=len(ordered_sources))
+        collected: dict[str, list[RawJob]] = {}
+        workers = max(1, min(int(max_workers), len(ordered_sources) or 1))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="discovery") as executor:
+            futures = {executor.submit(_collect_source, source, query_list, location, limit): source
+                       for source in ordered_sources}
+            for future in as_completed(futures):
+                source = futures[future]; stat = result.stats[source.name]
+                stat.target = getattr(source, "target_id", source.name)
+                stat.sector = getattr(source, "sector", "Other")
+                try:
+                    source_jobs, stat.latency_ms = future.result()
+                    collected[source.name] = source_jobs
+                    if stat.latency_ms > target_timeout_seconds * 1000:
+                        stat.timed_out = True
+                        stat.error = f"TargetTimeout: elapsed {stat.latency_ms}ms exceeded {target_timeout_seconds:g}s"
+                        stat.filter_reasons["source_error"] += 1
+                except Exception as exc:
+                    logger.warning("Discovery source %s failed: %s", source.name, exc)
+                    stat.error = f"{type(exc).__name__}: {exc}"
+                    stat.timed_out = isinstance(exc, (TimeoutError,)) or "timed out" in str(exc).casefold()
+                    stat.filter_reasons["source_error"] += 1
+                    collected[source.name] = []
+                result.sources_completed += 1
+        result.sources_failed = sum(bool(stat.error) for stat in result.stats.values())
+        result.sources_timed_out = sum(stat.timed_out for stat in result.stats.values())
         seen_urls: set[str] = set()
         seen_fingerprints: set[str] = set()
-        for source in self.sources:
+        for source in ordered_sources:
             stat = result.stats[source.name]
-            stat.target = getattr(source, "target_id", source.name)
-            stat.sector = getattr(source, "sector", "Other")
-            started = perf_counter()
             try:
-                batches: list[list[RawJob]] = []
-                for query in query_list:
-                    batches.append(source.discover(query, location, limit))
-                source_jobs = _round_robin_unique(batches, limit)
+                source_jobs = sorted(collected[source.name], key=lambda raw: (
+                    raw.source.casefold(), stat.target or "", raw.title.casefold(), canonical_url(raw.url)))
                 stat.fetched = len(source_jobs)
                 for raw in source_jobs:
                     if not raw.title.strip() or not raw.url.strip():
@@ -145,13 +177,19 @@ class DiscoveryAggregator:
                     stat.deduped += 1
                     stat.scored += 1
                     stat.fresh_count += int(job.priority_fresh)
-            except Exception as exc:  # A failed source must not stop discovery.
+            except Exception as exc:
                 logger.warning("Discovery source %s failed: %s", source.name, exc)
                 stat.error = f"{type(exc).__name__}: {exc}"
                 stat.filter_reasons["source_error"] += 1
-            finally:
-                stat.latency_ms = round((perf_counter() - started) * 1000)
+        result.total_elapsed_ms = round((perf_counter() - started_all) * 1000)
         return result
+
+
+def _collect_source(source: JobSource, queries: list[str], location: str | None,
+                    limit: int | None) -> tuple[list[RawJob], int]:
+    started = perf_counter()
+    jobs = source.discover(queries, location, limit)
+    return _round_robin_unique([jobs], limit), round((perf_counter() - started) * 1000)
 
 
 def _round_robin_unique(batches: list[list[RawJob]], limit: int | None) -> list[RawJob]:

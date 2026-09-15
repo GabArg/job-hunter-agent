@@ -16,7 +16,7 @@ class RecruiteeSource(JobSource):
         self.company, self.account, self._fetcher = company, account, fetcher
         self.name, self._payload = f"recruitee:{company}", None
 
-    def discover(self, query: str, location: str | None = None, limit: int | None = None) -> list[RawJob]:
+    def discover(self, query: str | list[str], location: str | None = None, limit: int | None = None) -> list[RawJob]:
         if self._payload is None:
             self._payload = self._fetcher(f"https://{quote(self.account)}.recruitee.com/api/offers/")
         items = self._payload.get("offers", []) if isinstance(self._payload, dict) else []
@@ -24,7 +24,7 @@ class RecruiteeSource(JobSource):
         for item in items:
             title = str(item.get("title") or "")
             description = " ".join(str(item.get(key) or "") for key in ("description", "requirements"))
-            if not title_matches(title, [query], description):
+            if not title_matches(title, [query] if isinstance(query, str) else query, description):
                 continue
             locations = item.get("locations") or []
             location_text = "; ".join(_location(value) for value in locations) or _location(item.get("location"))

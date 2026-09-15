@@ -48,16 +48,25 @@ def run_discovery_pipeline(
     location: str | None = None,
     limit: int | None = None,
     max_age_days: int | None = 14,
+    max_workers: int = 6,
+    target_timeout_seconds: float = 45.0,
 ) -> DiscoveryPipelineResult:
     profile = load_profile(profile_path)
     database = JobDatabase(database_path)
+    database.reconcile_stale_discovery_runs()
     run_id = database.create_discovery_run([source.name for source in sources])
+    discovery = DiscoveryResult()
+    processed = PipelineResult([], 0, 0)
+    status = "FAILED"
+    run_errors: dict[str, str] = {}
+    failure: Exception | None = None
     try:
         discovery = DiscoveryAggregator(sources).discover(
             queries or _profile_aliases(profile), location=location, limit=limit,
             preferred_locations=[location] if location else profile.preferred_locations,
             max_age_days=max_age_days,
             priority_fresh_days=profile.priority_fresh_days,
+            max_workers=max_workers, target_timeout_seconds=target_timeout_seconds,
         )
         existing_urls = {job.url for job in discovery.jobs if database.get_job(url=job.url) is not None}
         processed = process_jobs(discovery.jobs, profile_path, database_path)
@@ -70,16 +79,8 @@ def run_discovery_pipeline(
                   for name in ("fetched", "fresh", "geo_eligible", "role_relevant", "deduped", "scored")}
         filter_reasons = {reason: sum(stat.filter_reasons[reason] for stat in discovery.stats.values())
                           for reason in next(iter(discovery.stats.values())).filter_reasons} if discovery.stats else {}
-        database.finish_discovery_run(
-            run_id, status="COMPLETED_WITH_ERRORS" if discovery.errors else "COMPLETED",
-            preliminary=sum(stat.fetched for stat in discovery.stats.values()), new_jobs=processed.inserted,
-            updated_jobs=processed.updated, duplicates=discovery.duplicates,
-            apply_count=counts["APPLY"], review_count=counts["REVIEW"], reject_count=counts["REJECT"],
-            errors=discovery.errors,
-            fetched=funnel["fetched"], fresh=funnel["fresh"], geo_eligible=funnel["geo_eligible"],
-            role_relevant=funnel["role_relevant"], deduped=funnel["deduped"], scored=funnel["scored"],
-            filter_reasons=filter_reasons,
-        )
+        status = "COMPLETED_WITH_ERRORS" if discovery.errors else "COMPLETED"
+        run_errors = discovery.errors
         for source_name, stat in discovery.stats.items():
             source_jobs = [job for job in processed.jobs if job.source.casefold() == source_name.casefold()]
             if stat.sector == "Other" and source_jobs:
@@ -104,8 +105,28 @@ def run_discovery_pipeline(
                 new_jobs=stat.new_jobs, updated_jobs=stat.updated_jobs, filter_reasons=stat.filter_reasons,
             )
     except Exception as exc:
-        database.finish_discovery_run(run_id, status="FAILED", errors={"pipeline": f"{type(exc).__name__}: {exc}"})
-        raise
+        failure = exc
+        run_errors = {**discovery.errors, "pipeline": f"{type(exc).__name__}: {exc}"}
+    finally:
+        funnel = {name: sum(getattr(stat, name) for stat in discovery.stats.values())
+                  for name in ("fetched", "fresh", "geo_eligible", "role_relevant", "deduped", "scored")}
+        filter_reasons = {reason: sum(stat.filter_reasons[reason] for stat in discovery.stats.values())
+                          for reason in next(iter(discovery.stats.values())).filter_reasons} if discovery.stats else {}
+        counts = {decision: sum(job.decision == decision for job in processed.jobs)
+                  for decision in ("APPLY", "REVIEW", "REJECT")}
+        database.finish_discovery_run(
+            run_id, status=status, preliminary=funnel["fetched"], new_jobs=processed.inserted,
+            updated_jobs=processed.updated, duplicates=discovery.duplicates,
+            apply_count=counts["APPLY"], review_count=counts["REVIEW"], reject_count=counts["REJECT"],
+            errors=run_errors, fetched=funnel["fetched"], fresh=funnel["fresh"],
+            geo_eligible=funnel["geo_eligible"], role_relevant=funnel["role_relevant"],
+            deduped=funnel["deduped"], scored=funnel["scored"], filter_reasons=filter_reasons,
+            total_elapsed_ms=discovery.total_elapsed_ms, sources_started=discovery.sources_started,
+            sources_completed=discovery.sources_completed, sources_failed=discovery.sources_failed,
+            sources_timed_out=discovery.sources_timed_out,
+        )
+    if failure is not None:
+        raise failure
     return DiscoveryPipelineResult(
         jobs=rank_jobs(processed.jobs),
         inserted=processed.inserted,

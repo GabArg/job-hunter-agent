@@ -15,7 +15,7 @@ class GreenhouseSource(JobSource):
         self.name = f"greenhouse:{company}"
         self._payload: Any = None
 
-    def discover(self, query: str, location: str | None = None, limit: int | None = None) -> list[RawJob]:
+    def discover(self, query: str | list[str], location: str | None = None, limit: int | None = None) -> list[RawJob]:
         if self._payload is None:
             url = f"https://boards-api.greenhouse.io/v1/boards/{quote(self.board_token)}/jobs?content=true"
             self._payload = self._fetcher(url)
@@ -23,7 +23,7 @@ class GreenhouseSource(JobSource):
         results = []
         for item in items:
             item_location = str((item.get("location") or {}).get("name") or "")
-            if not title_matches(str(item.get("title", "")), [query]):
+            if not title_matches(str(item.get("title", "")), [query] if isinstance(query, str) else query):
                 continue
             results.append(RawJob(str(item.get("id", "")), str(item.get("title", "")), self.company,
                 item_location, _mode(item_location), str(item.get("content") or ""), self.name,

@@ -738,6 +738,9 @@ with system_tab:
     st.caption("Scheduler de Windows: scripts preparados; estado no consultado para evitar requerir privilegios.")
     if runs:
         latest = runs[0]
+        st.caption(f'Duración: {latest.get("total_elapsed_ms", 0) / 1000:.1f}s · '
+                   f'Fuentes completadas: {latest.get("sources_completed", 0)}/{latest.get("sources_started", 0)} · '
+                   f'Errores: {latest.get("sources_failed", 0)} · Timeouts: {latest.get("sources_timed_out", 0)}')
         st.subheader("Funnel del último run")
         funnel_columns = st.columns(9)
         for column, (label, key) in zip(funnel_columns, (
@@ -754,7 +757,7 @@ with system_tab:
                            "Geo eligible": row["geo_eligible"], "Role relevant": row["role_relevant"],
                            "Deduplicated": row["deduped"], "New": row["new_jobs"], "Scored": row["scored"],
                            "APPLY": row["apply_count"], "REVIEW": row["review_count"], "REJECT": row["reject_count"],
-                           "Filters": row["filter_reasons"], "Health": row["health"]} for row in latest_sources],
+                           "Latency": row["latency_ms"], "Filters": row["filter_reasons"], "Health": row["health"]} for row in latest_sources],
                          hide_index=True, width="stretch")
         st.dataframe([{"Run": run["id"], "Inicio": _display_time(run["started_at"]), "Fin": _display_time(run["finished_at"]),
                        "Estado": run["status"], "Fuentes": run["sources"], "Preliminares": run["preliminary"],
@@ -790,6 +793,8 @@ with system_tab:
                        "REVIEW": row["review_count"], "REJECT": row["reject_count"],
                        "Duplicates": row["duplicates"], "Errors": row["errors"],
                        "Quality Score": row["quality_score"], "Health": row["health"],
+                       "Latency": row["last_latency_ms"], "Avg latency": row["average_latency_ms"],
+                       "Failures": row["consecutive_failures"],
                        "Last success": _display_time(row["last_success_at"]), "Last jobs": row["last_jobs_count"],
                        "Última ejecución": _display_time(row["last_run"])} for row in intelligence],
                      hide_index=True, width="stretch")
